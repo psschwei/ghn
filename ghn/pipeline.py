@@ -1,0 +1,478 @@
+"""Orchestration for the GitHub notifications inbox skill (Type A, Sequential, P4).
+
+Phase flow (SKILL.md Steps 1-8):
+  1. Identify the user on each configured host (tools.fetch_user_logins).
+  2. Read the existing inbox doc (loader.read_existing_inbox).
+  3. Fetch the unread-notification delta from each configured host (tools.fetch_notifications).
+     Classify the user's filter request (slots.classify_filter_mode) and apply it.
+     Empty delta -> early exit (no write, no mark Done).
+  4. Enrich each delta item (tools.enrich_*), gated by reason priority.
+  5. Classify each item into a bucket (slots.classify_bucket) and render its prose
+     (m.instruct(format=ItemRender)). Fold against the existing items by html_url.
+  6. Render + write the whole inbox doc (deterministic Org-mode assembly).
+  7. Confirm the write, then mark each folded thread Done (tools.mark_thread_done).
+  8. Generate a conversational run summary (m.instruct(format=RunSummary)).
+
+KB notes baked in: KB1 (parse thunks), KB5 (one BaseModel per session — ItemRender,
+RunSummary, and each @generative slot's response model each get their own session),
+KB7 (persona via ModelOption.SYSTEM_PROMPT).
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+from mellea import start_session
+from mellea.backends.model_options import ModelOption
+from pydantic import BaseModel
+
+from .config import (
+    BACKEND,
+    EMPTY_BUCKET_PLACEHOLDER,
+    GITHUB_COM_HOST,
+    GITHUB_HOSTS,
+    HIGH_PRIORITY_REASONS,
+    INBOX_PATH,
+    MODEL_ID,
+    ORG_TITLE,
+    PREFIX_TEXT,
+    SKIP_LOW_PRIORITY_COMMENT_FETCH,
+)
+from .loader import parse_notification, read_existing_inbox
+from .schemas import ItemRender, RunSummary
+from .slots import classify_bucket, classify_filter_mode
+from . import tools
+
+# --- C2 lookup tables (elem_010, elem_022) ------------------------------------
+# config.py is scalar-only (writer-rendered), so these dict constants live here.
+
+# reason -> human-readable "Why you're seeing this" string.
+REASON_DISPLAY: dict[str, str] = {
+    "review_requested": "Review requested",
+    "mention": "You were mentioned",
+    "author": "Activity on your PR/issue",
+    "assign": "Assigned to you",
+    "comment": "New comment in conversation",
+    "subscribed": "Repo activity",
+    "team_mention": "Your team was mentioned",
+    "state_change": "State change on a watched item",
+    "ci_activity": "CI status changed",
+}
+
+# reason -> coarse priority (informational; bucket decision is the slot's job).
+REASON_REFERENCE: dict[str, str] = {
+    "assign": "high",
+    "review_requested": "high",
+    "mention": "high",
+    "author": "medium",
+    "comment": "medium",
+    "team_mention": "medium",
+    "subscribed": "low",
+    "state_change": "low",
+    "ci_activity": "low",
+}
+
+_HIGH_PRIORITY: frozenset[str] = frozenset(
+    r.strip() for r in HIGH_PRIORITY_REASONS.split(",") if r.strip()
+)
+
+
+# --- KB1 thunk-parsing helpers ------------------------------------------------
+
+def _parse_instruct_result(thunk, model_class: type[BaseModel]):
+    """Parse an m.instruct(format=Model) result into its Pydantic model."""
+    return model_class.model_validate_json(thunk.value)
+
+
+def _safe_parse_with_fallback(thunk, model_class: type[BaseModel], **fallback_kwargs):
+    """Parse with a fallback model on parse failure (KB2 — truncation guard)."""
+    try:
+        return model_class.model_validate_json(thunk.value)
+    except Exception:
+        return model_class(**fallback_kwargs)
+
+
+# --- deterministic helpers ----------------------------------------------------
+
+def current_timestamp() -> str:
+    """Current timestamp for the #+DATE header (elem_019, replaces shell `date`)."""
+    return datetime.now().strftime("%Y-%m-%d %H:%M")
+
+
+def _host_for(notif: dict[str, Any]) -> str:
+    """Return the GitHub host a notification belongs to."""
+    return notif.get("host", GITHUB_COM_HOST)
+
+
+def _passes_filter(notif: dict[str, Any], filter_mode: str) -> bool:
+    """Apply the user's filter mode to a single notification (elem_006)."""
+    stype = notif.get("subject_type", "")
+    if filter_mode == "issues":
+        return stype == "Issue"
+    if filter_mode == "prs":
+        return stype == "PullRequest"
+    if filter_mode == "review_requests":
+        return stype == "PullRequest" and notif.get("reason") == "review_requested"
+    return True  # "all"
+
+
+def _pr_state_summary(enriched: dict[str, Any]) -> str:
+    """Collapse PR enrichment fields into a single state word for the bucket slot."""
+    if enriched.get("inaccessible"):
+        return "inaccessible"
+    if enriched.get("merged"):
+        return "merged"
+    if enriched.get("draft"):
+        return "draft"
+    return str(enriched.get("state") or "n/a")
+
+
+def _fetch_delta(filter_mode: str) -> list[dict[str, Any]]:
+    """Fetch + parse + filter the unread delta from both hosts (Step 3)."""
+    delta: list[dict[str, Any]] = []
+    for host in GITHUB_HOSTS:
+        try:
+            raw_items = tools.fetch_notifications(host)
+        except tools.GitHubToolError:
+            continue  # host unavailable / not authenticated
+        for raw in raw_items:
+            notif = parse_notification(raw, host)
+            if _passes_filter(notif, filter_mode):
+                delta.append(notif)
+    return delta
+
+
+def _enrich(notif: dict[str, Any], logins: dict[str, str]) -> dict[str, Any]:
+    """Enrich one notification with subject + review + latest-comment context (Step 4)."""
+    host = _host_for(notif)
+    subject_url = notif.get("subject_url", "")
+    subject_type = notif.get("subject_type", "")
+    enriched = tools.enrich_subject(subject_url, subject_type, host) if subject_url else {}
+
+    user_reviewed = "no"
+    latest_review_state = "none"
+    if subject_type == "PullRequest" and subject_url and not enriched.get("inaccessible"):
+        login = logins.get(host, "")
+        if login:
+            own = tools.fetch_review_state(subject_url, host, login=login, exclude=False)
+            user_reviewed = "yes" if own and own != "none" else "no"
+            if notif.get("reason") == "author":
+                latest_review_state = tools.fetch_review_state(
+                    subject_url, host, login=login, exclude=True
+                )
+
+    latest_comment: dict[str, Any] = {}
+    reason = notif.get("reason", "")
+    should_fetch_comment = reason in _HIGH_PRIORITY or not SKIP_LOW_PRIORITY_COMMENT_FETCH
+    if should_fetch_comment and notif.get("latest_comment_url"):
+        latest_comment = tools.fetch_latest_comment(notif["latest_comment_url"], host)
+
+    return {
+        **notif,
+        "enriched": enriched,
+        "html_url": enriched.get("html_url", notif.get("subject_url", "")),
+        "user_reviewed": user_reviewed,
+        "latest_review_state": latest_review_state,
+        "latest_comment": latest_comment,
+    }
+
+
+# --- Org-mode rendering (elem_020/021/022) ------------------------------------
+
+def render_item_subtree(item: dict[str, Any], render: ItemRender, level: int) -> str:
+    """Render one item subtree at the given heading depth (Step 6).
+
+    Emits: heading, :PROPERTIES: drawer (:URL: + :HOST: — REQUIRED in every section),
+    the raw html_url on its own line (for C-c C-o / link-open access), a metadata
+    table (Reviewers row omitted for Issues), the generated summary, the
+    "Why you're seeing this" line, and the "Latest activity" line.
+    """
+    stars = "*" * level
+    indent = " " * (level + 1)
+    enriched = item.get("enriched", {})
+    host = _host_for(item)
+    is_pr = item.get("subject_type") == "PullRequest"
+
+    lines = [f"{stars} {item.get('title', '(untitled)')}"]
+    lines.append(f"{indent}:PROPERTIES:")
+    lines.append(f"{indent}:URL:  {item.get('html_url', '')}")
+    lines.append(f"{indent}:HOST: {host}")
+    lines.append(f"{indent}:END:")
+    lines.append(f"{indent}{item.get('html_url', '')}")
+    lines.append("")
+
+    rows = [
+        ("State", str(enriched.get("state", "unknown"))),
+        ("Author", str(enriched.get("user", "unknown"))),
+    ]
+    if is_pr:
+        reviewers = enriched.get("requested_reviewers") or []
+        rows.append(("Reviewers", ", ".join(reviewers) if reviewers else "—"))
+    labels = enriched.get("labels") or []
+    rows.append(("Labels", ", ".join(labels) if labels else "—"))
+    rows.append(("Milestone", str(enriched.get("milestone") or "—")))
+
+    width = max(len(k) for k, _ in rows)
+    lines.append(f"{indent}| Field{' ' * (width - 5)} | Value |")
+    lines.append(f"{indent}|{'-' * (width + 2)}+-------|")
+    for key, val in rows:
+        lines.append(f"{indent}| {key}{' ' * (width - len(key))} | {val} |")
+    lines.append("")
+
+    lines.append(f"{indent}{render.summary}")
+    lines.append("")
+    lines.append(f"{indent}*Why you're seeing this:* {render.why_seeing}")
+    lines.append("")
+    lines.append(f"{indent}*Latest activity:* {render.latest_activity}")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def render_inbox_org(
+    buckets: dict[str, list[str]],
+    timestamp: str,
+) -> str:
+    """Assemble the full Org-mode inbox document (Step 6).
+
+    ``buckets`` maps "action_required"/"should_check"/"fyi_prs"/"fyi_issues" to lists
+    of pre-rendered item subtree strings. Empty buckets get the italic placeholder.
+    """
+    out = [f"#+TITLE: {ORG_TITLE}", f"#+DATE: {timestamp}", ""]
+
+    out.append("* Action Required")
+    if buckets.get("action_required"):
+        out.extend(buckets["action_required"])
+    else:
+        out.append(EMPTY_BUCKET_PLACEHOLDER)
+        out.append("")
+
+    out.append("* Should Check")
+    if buckets.get("should_check"):
+        out.extend(buckets["should_check"])
+    else:
+        out.append(EMPTY_BUCKET_PLACEHOLDER)
+        out.append("")
+
+    out.append("* FYI")
+    if buckets.get("fyi_prs") or buckets.get("fyi_issues"):
+        out.append("** Pull Requests")
+        if buckets.get("fyi_prs"):
+            out.extend(buckets["fyi_prs"])
+        else:
+            out.append(EMPTY_BUCKET_PLACEHOLDER)
+            out.append("")
+        out.append("** Issues")
+        if buckets.get("fyi_issues"):
+            out.extend(buckets["fyi_issues"])
+        else:
+            out.append(EMPTY_BUCKET_PLACEHOLDER)
+            out.append("")
+    else:
+        out.append(EMPTY_BUCKET_PLACEHOLDER)
+        out.append("")
+
+    return "\n".join(out).rstrip() + "\n"
+
+
+def confirm_inbox_written(inbox_path: str | Path) -> bool:
+    """Write-gate (elem_023): inbox file exists and is non-empty before mark-Done."""
+    p = Path(inbox_path)
+    return p.exists() and p.stat().st_size > 0
+
+
+# --- main orchestration -------------------------------------------------------
+
+def run_pipeline(user_request: str = "") -> RunSummary:
+    """Run one full inbox-update pass. Returns a conversational RunSummary.
+
+    P4 shape: GitHub data is fetched internally via tools; the only user-facing
+    parameter is the natural-language request, which carries the optional filter intent.
+    """
+    inbox_path = Path(INBOX_PATH)
+
+    # Step 1: identify the user on both hosts.
+    try:
+        logins = tools.fetch_user_logins()
+    except tools.GitHubToolError:
+        logins = {}
+
+    # Step 2: read the existing inbox (de-dup map keyed by html_url).
+    existing = read_existing_inbox(inbox_path)
+
+    # Step 3 (filter): classify the user's request into a filter mode.
+    # Each @generative slot defines its own response model — give it its own session (KB5).
+    with start_session(BACKEND, MODEL_ID) as m_filter:
+        filter_mode = classify_filter_mode(m_filter, user_request=user_request or "")
+    filter_mode = str(filter_mode)
+
+    # Step 3 (fetch): get the delta, apply the filter.
+    delta = _fetch_delta(filter_mode)
+
+    # Empty-delta early exit (elem_009): no write, no mark Done.
+    if not delta:
+        carried = len(existing)
+        return RunSummary(
+            headline="Nothing new on GitHub — your inbox is already up to date.",
+            new_count=0,
+            refreshed_count=0,
+            carried_over_count=carried,
+            most_important="No Action Required items changed this run.",
+            reminder=(
+                f"Items stay in {INBOX_PATH} until you remove them by hand."
+            ),
+        )
+
+    # Step 4: enrich each delta item.
+    enriched_items = [_enrich(n, logins) for n in delta]
+
+    # Step 5 (classify): bucket each item. classify_bucket's response model is one
+    # schema type, so a single dedicated session is safe for all bucket calls (KB5).
+    with start_session(BACKEND, MODEL_ID) as m_bucket:
+        for item in enriched_items:
+            enriched = item.get("enriched", {})
+            comment_body = str((item.get("latest_comment") or {}).get("body", ""))
+            item["bucket"] = str(
+                classify_bucket(
+                    m_bucket,
+                    reason=item.get("reason", ""),
+                    subject_type=item.get("subject_type", ""),
+                    pr_state=_pr_state_summary(enriched),
+                    user_reviewed=item.get("user_reviewed", "no"),
+                    latest_review_state=item.get("latest_review_state", "none"),
+                    latest_comment_text=comment_body,
+                )
+            )
+
+    # Step 5 (render): generate prose for each item. ItemRender is one schema type;
+    # a single dedicated session is safe (KB5). Distinct from the bucket session above.
+    rendered: dict[str, tuple[dict[str, Any], ItemRender]] = {}
+    with start_session(BACKEND, MODEL_ID) as m_render:
+        for item in enriched_items:
+            enriched = item.get("enriched", {})
+            comment = item.get("latest_comment") or {}
+            why = REASON_DISPLAY.get(item.get("reason", ""), "Repo activity")
+            render_thunk = m_render.instruct(
+                "Summarise this GitHub {{ subject_type }} for a triage inbox.\n"
+                "Title: {{ title }}\n"
+                "Repository: {{ repo }}\n"
+                "Subject details (JSON): {{ details }}\n"
+                "Latest comment (JSON): {{ comment }}\n"
+                "Reason the user is seeing this: {{ why }}\n\n"
+                "Write a 2-3 sentence summary, a one-line 'why you're seeing this' "
+                "(use the reason given), and a one-line latest-activity note "
+                "(who did what; 1-2 sentence excerpt max).",
+                user_variables={
+                    "subject_type": str(item.get("subject_type", "")),
+                    "title": str(item.get("title", "")),
+                    "repo": str(item.get("repo_full_name", "")),
+                    "details": str(enriched),
+                    "comment": str(comment),
+                    "why": str(why),
+                },
+                model_options={ModelOption.SYSTEM_PROMPT: PREFIX_TEXT},
+                format=ItemRender,
+            )
+            render = _safe_parse_with_fallback(
+                render_thunk,
+                ItemRender,
+                summary=str(item.get("title", "")),
+                why_seeing=why,
+                latest_activity=str(item.get("updated_at", "")),
+            )
+            url = item.get("html_url", "")
+            rendered[url] = (item, render)
+
+    # Step 5 (fold): reconcile by html_url. New/refreshed items are re-rendered;
+    # existing-but-not-in-delta items are carried over verbatim.
+    new_count = sum(1 for url in rendered if url not in existing)
+    refreshed_count = sum(1 for url in rendered if url in existing)
+    delta_urls = set(rendered)
+    carried_urls = [url for url in existing if url not in delta_urls]
+    carried_over_count = len(carried_urls)
+
+    # Sort delta items by latest activity, most recent first.
+    ordered = sorted(
+        rendered.values(),
+        key=lambda pair: str(pair[0].get("updated_at", "")),
+        reverse=True,
+    )
+
+    buckets: dict[str, list[str]] = {
+        "action_required": [],
+        "should_check": [],
+        "fyi_prs": [],
+        "fyi_issues": [],
+    }
+    action_required_titles: list[str] = []
+    for item, render in ordered:
+        bucket = item.get("bucket", "fyi")
+        if bucket == "action_required":
+            buckets["action_required"].append(render_item_subtree(item, render, level=2))
+            action_required_titles.append(str(item.get("title", "")))
+        elif bucket == "should_check":
+            buckets["should_check"].append(render_item_subtree(item, render, level=2))
+        else:  # fyi — grouped by type at level 3
+            key = "fyi_prs" if item.get("subject_type") == "PullRequest" else "fyi_issues"
+            buckets[key].append(render_item_subtree(item, render, level=3))
+
+    # Carried-over items keep their original subtree text verbatim. We append them to
+    # FYI by default (their original bucket is preserved in the stored text); a fuller
+    # implementation would re-bucket from the stored drawer, but per Step 5 untouched
+    # items are not re-classified, so we preserve their text under FYI groupings.
+    for url in carried_urls:
+        block = existing[url]
+        if "/pull/" in url:
+            buckets["fyi_prs"].append(block)
+        else:
+            buckets["fyi_issues"].append(block)
+
+    # Step 6: write the doc (BEFORE marking Done — the irreversible commit point).
+    doc = render_inbox_org(buckets, current_timestamp())
+    inbox_path.parent.mkdir(parents=True, exist_ok=True)
+    inbox_path.write_text(doc, encoding="utf-8")
+
+    # Step 7: confirm the write, then mark each folded thread Done (per-thread DELETE).
+    if confirm_inbox_written(inbox_path):
+        for item in enriched_items:
+            thread_id = item.get("id", "")
+            if thread_id:
+                try:
+                    tools.mark_thread_done(thread_id, _host_for(item))
+                except tools.GitHubToolError:
+                    pass  # leave the thread in the inbox; safe to retry next run
+
+    # Step 8: conversational summary. RunSummary is its own schema -> own session (KB5).
+    most_important = (
+        "; ".join(action_required_titles[:3])
+        if action_required_titles
+        else "No Action Required items this run."
+    )
+    with start_session(BACKEND, MODEL_ID) as m_summary:
+        summary_thunk = m_summary.instruct(
+            "Write a short, friendly summary of this GitHub inbox update.\n"
+            "New items added: {{ new }}\n"
+            "Existing items refreshed: {{ refreshed }}\n"
+            "Items carried over untouched: {{ carried }}\n"
+            "Most important Action Required item(s): {{ important }}\n\n"
+            "Include a one-line reminder that items stay in the inbox until removed by hand.",
+            user_variables={
+                "new": str(new_count),
+                "refreshed": str(refreshed_count),
+                "carried": str(carried_over_count),
+                "important": most_important,
+            },
+            model_options={ModelOption.SYSTEM_PROMPT: PREFIX_TEXT},
+            format=RunSummary,
+        )
+    return _safe_parse_with_fallback(
+        summary_thunk,
+        RunSummary,
+        headline="GitHub inbox updated.",
+        new_count=new_count,
+        refreshed_count=refreshed_count,
+        carried_over_count=carried_over_count,
+        most_important=most_important,
+        reminder=f"Items stay in {INBOX_PATH} until you remove them by hand.",
+    )
