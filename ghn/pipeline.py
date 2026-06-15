@@ -35,7 +35,9 @@ from .config import (
     GITHUB_HOSTS,
     HIGH_PRIORITY_REASONS,
     INBOX_PATH,
+    ITEM_SUMMARY_MAX_TOKENS,
     MODEL_ID,
+    RUN_SUMMARY_MAX_TOKENS,
     ORG_TITLE,
     PREFIX_TEXT,
     SKIP_LOW_PRIORITY_COMMENT_FETCH,
@@ -329,16 +331,22 @@ def run_pipeline(user_request: str = "") -> RunSummary:
 
     # Step 5 (classify): bucket each item. classify_bucket's response model is one
     # schema type, so a single dedicated session is safe for all bucket calls (KB5).
+    # Closed/merged issues+PRs and draft PRs are forced to FYI deterministically —
+    # these are unambiguous and we don't burn a model call (or trust the 3B model) on them.
     with start_session(BACKEND, MODEL_ID) as m_bucket:
         for item in enriched_items:
             enriched = item.get("enriched", {})
+            pr_state = _pr_state_summary(enriched)
+            if pr_state in ("closed", "merged", "draft"):
+                item["bucket"] = "fyi"
+                continue
             comment_body = str((item.get("latest_comment") or {}).get("body", ""))
             item["bucket"] = str(
                 classify_bucket(
                     m_bucket,
                     reason=item.get("reason", ""),
                     subject_type=item.get("subject_type", ""),
-                    pr_state=_pr_state_summary(enriched),
+                    pr_state=pr_state,
                     user_reviewed=item.get("user_reviewed", "no"),
                     latest_review_state=item.get("latest_review_state", "none"),
                     latest_comment_text=comment_body,
@@ -360,9 +368,14 @@ def run_pipeline(user_request: str = "") -> RunSummary:
                 "Subject details (JSON): {{ details }}\n"
                 "Latest comment (JSON): {{ comment }}\n"
                 "Reason the user is seeing this: {{ why }}\n\n"
-                "Write a 2-3 sentence summary, a one-line 'why you're seeing this' "
-                "(use the reason given), and a one-line latest-activity note "
-                "(who did what; 1-2 sentence excerpt max).",
+                "Write a substantive 3-5 sentence summary that gives the user enough "
+                "context to decide what to do without clicking through: what the "
+                "issue/PR is about, its current state, and any open questions or "
+                "blockers. Use concrete details from the subject and latest comment "
+                "(reviewers, labels, milestone, CI/merge state) rather than restating "
+                "the title. Then write a one-line 'why you're seeing this' (use the "
+                "reason given), and a one-line latest-activity note (who did what, with "
+                "a short quoted excerpt if it clarifies the ask).",
                 user_variables={
                     "subject_type": str(item.get("subject_type", "")),
                     "title": str(item.get("title", "")),
@@ -371,7 +384,10 @@ def run_pipeline(user_request: str = "") -> RunSummary:
                     "comment": str(comment),
                     "why": str(why),
                 },
-                model_options={ModelOption.SYSTEM_PROMPT: PREFIX_TEXT},
+                model_options={
+                    ModelOption.SYSTEM_PROMPT: PREFIX_TEXT,
+                    ModelOption.MAX_NEW_TOKENS: ITEM_SUMMARY_MAX_TOKENS,
+                },
                 format=ItemRender,
             )
             render = _safe_parse_with_fallback(
@@ -463,7 +479,10 @@ def run_pipeline(user_request: str = "") -> RunSummary:
                 "carried": str(carried_over_count),
                 "important": most_important,
             },
-            model_options={ModelOption.SYSTEM_PROMPT: PREFIX_TEXT},
+            model_options={
+                ModelOption.SYSTEM_PROMPT: PREFIX_TEXT,
+                ModelOption.MAX_NEW_TOKENS: RUN_SUMMARY_MAX_TOKENS,
+            },
             format=RunSummary,
         )
     return _safe_parse_with_fallback(

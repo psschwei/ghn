@@ -78,3 +78,13 @@ BACKEND: Final[str] = 'ollama'
 MODEL_ID: Final[str] = 'granite4.1:3b'
 
 LOOP_BUDGET: Final[int] = 3
+
+# Generation budgets (Ollama num_predict). Without these the backend falls back to
+# its small default, which truncates summaries to a bare-bones sentence or two.
+# Override per-deployment with GHN_ITEM_SUMMARY_MAX_TOKENS / GHN_RUN_SUMMARY_MAX_TOKENS.
+ITEM_SUMMARY_MAX_TOKENS: Final[int] = int(
+    os.environ.get('GHN_ITEM_SUMMARY_MAX_TOKENS', '1024')
+)
+RUN_SUMMARY_MAX_TOKENS: Final[int] = int(
+    os.environ.get('GHN_RUN_SUMMARY_MAX_TOKENS', '512')
+)

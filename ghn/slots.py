@@ -70,6 +70,9 @@ def classify_bucket(
           * reason is "ci_activity" on the user's own PR and CI is failing.
       - "fyi" for everything else (subscribed repo activity, state changes on watched things).
 
+    Any closed or merged issue/PR, and any draft PR, always belongs in "fyi"
+    regardless of reason — there is no live action to take on it.
+
     An approved PR the user authored belongs in "should_check", never "action_required".
     """
     ...

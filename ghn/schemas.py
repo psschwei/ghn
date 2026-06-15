@@ -20,7 +20,7 @@ class ItemRender(BaseModel):
     """
 
     summary: str = Field(
-        description="A 2-3 sentence summary of the issue/PR giving enough context to act without clicking through.",
+        description="A substantive 3-5 sentence summary of the issue/PR: what it is about, its current state, and any open questions or blockers — enough context to act without clicking through.",
     )
     why_seeing: str = Field(
         description="One human-readable line explaining why the user is seeing this (the 'Why you're seeing this' line).",
