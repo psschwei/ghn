@@ -20,13 +20,25 @@ class ItemRender(BaseModel):
     """
 
     summary: str = Field(
-        description="A substantive 3-5 sentence summary of the issue/PR: what it is about, its current state, and any open questions or blockers — enough context to act without clicking through.",
+        description="A substantive 3-5 sentence summary of the issue/PR: what it is about, its current state, and any open questions or blockers — enough context to act without clicking through. When a cleaned PR/issue description is provided, base the summary on it; ignore any leftover template scaffolding, checklists, or HTML comments.",
     )
     why_seeing: str = Field(
         description="One human-readable line explaining why the user is seeing this (the 'Why you're seeing this' line).",
     )
     latest_activity: str = Field(
         description="One line describing the most recent activity: who did what, with a brief excerpt if useful (1-2 sentences max).",
+    )
+
+
+class ActivityDelta(BaseModel):
+    """New-activity-only delta for a previously-tracked item (GENERATE).
+
+    Rendered when a known inbox item has new comments/reviews since its stored cutoff.
+    The prose covers ONLY what changed since last run — not a re-summary of the item.
+    """
+
+    delta: str = Field(
+        description="A 2-4 sentence summary of ONLY the new activity since the last run: who left a review and its state (approved / requested changes / commented), and any notable back-and-forth in new comments (e.g. 'markstur requested changes; AngeloDanducci replied that the docstring is fixed'). Name the people involved. Do not restate the item's original description.",
     )
 
 

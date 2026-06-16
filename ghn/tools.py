@@ -133,13 +133,15 @@ _PR_JQ = (
     "milestone: .milestone.title, review_comments: .review_comments, "
     "comments: .comments, mergeable_state: .mergeable_state, "
     "auto_merge: (.auto_merge != null), "
-    "auto_merge_enabled_by: .auto_merge.enabled_by.login}"
+    "auto_merge_enabled_by: .auto_merge.enabled_by.login, "
+    "body: .body, created_at: .created_at}"
 )
 
 _ISSUE_JQ = (
     "{html_url: .html_url, state: .state, user: .user.login, "
     "assignees: [.assignees[].login], labels: [.labels[].name], "
-    "milestone: .milestone.title, comments: .comments}"
+    "milestone: .milestone.title, comments: .comments, "
+    "body: .body, created_at: .created_at}"
 )
 
 
@@ -238,6 +240,58 @@ def fetch_latest_comment(latest_comment_url: str, host: str) -> dict[str, Any]:
         return _gh_json(["api", latest_comment_url, "--jq", jq], host=host) or {}
     except (GitHubToolError, json.JSONDecodeError):
         return {}
+
+
+# --- new-activity delta: comments + reviews since the per-item cutoff ----------
+
+def _issue_comments_url(subject_url: str) -> str:
+    """Derive the issue-comments collection URL from a notification subject URL.
+
+    PR subjects are ``…/pulls/{n}``; their conversation comments live under the
+    *issues* path (``…/issues/{n}/comments``). Issue subjects are ``…/issues/{n}``.
+    """
+    base = subject_url.replace("/pulls/", "/issues/")
+    return f"{base}/comments"
+
+
+def fetch_new_comments(subject_url: str, host: str, *, since: str) -> list[dict[str, Any]]:
+    """Fetch conversation comments created after ``since`` (ISO-8601 UTC) (new-activity delta).
+
+    Uses the ``?since=`` query param so the date filtering happens server-side. Works for
+    both PRs and Issues (PR conversation comments live on the issues endpoint). Returns
+    ``[{author, body, created_at}]`` ordered oldest-first, or ``[]`` on error / no subject.
+    """
+    if not subject_url or not since:
+        return []
+    url = f"{_issue_comments_url(subject_url)}?since={since}"
+    jq = "[.[] | {author: .user.login, body: .body, created_at: .created_at}]"
+    try:
+        result = _gh_json(["api", url, "--paginate", "--jq", jq], host=host)
+    except (GitHubToolError, json.JSONDecodeError):
+        return []
+    return result if isinstance(result, list) else []
+
+
+def fetch_new_reviews(subject_url: str, host: str, *, since: str) -> list[dict[str, Any]]:
+    """Fetch PR reviews submitted after ``since`` (ISO-8601 UTC) (new-activity delta).
+
+    The reviews endpoint has no ``since`` param, so we project each review and filter by
+    ``submitted_at`` in jq. Returns ``[{author, state, submitted_at, body}]`` ordered
+    oldest-first, or ``[]`` on error / no subject. Issues have no reviews -> ``[]``.
+    """
+    if not subject_url or not since:
+        return []
+    jq = (
+        f'[.[] | select(.submitted_at != null and .submitted_at > "{since}") '
+        "| {author: .user.login, state: .state, submitted_at: .submitted_at, body: .body}]"
+    )
+    try:
+        result = _gh_json(
+            ["api", f"{subject_url}/reviews", "--paginate", "--jq", jq], host=host
+        )
+    except (GitHubToolError, json.JSONDecodeError):
+        return []
+    return result if isinstance(result, list) else []
 
 
 # --- elem_024/025: mark a thread Done (destructive) ---------------------------
