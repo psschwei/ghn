@@ -120,6 +120,21 @@ def _passes_filter(notif: dict[str, Any], filter_mode: str) -> bool:
     return True  # "all"
 
 
+def _merge_queue_summary(enriched: dict[str, Any]) -> str:
+    """Render the merge-queue / auto-merge status line for a PR (REST-only signal).
+
+    ``mergeable_state == "queued"`` means GitHub has placed the PR in the merge
+    queue. Otherwise, ``auto_merge`` being set means auto-merge is armed (it will
+    enter the queue / merge once checks pass). Falls back to "—" when neither holds.
+    """
+    if str(enriched.get("mergeable_state") or "") == "queued":
+        return "In merge queue"
+    if enriched.get("auto_merge"):
+        by = str(enriched.get("auto_merge_enabled_by") or "")
+        return f"Auto-merge enabled (by {by})" if by else "Auto-merge enabled"
+    return "—"
+
+
 def _pr_state_summary(enriched: dict[str, Any]) -> str:
     """Collapse PR enrichment fields into a single state word for the bucket slot."""
     if enriched.get("inaccessible"):
@@ -155,7 +170,13 @@ def _enrich(notif: dict[str, Any], logins: dict[str, str]) -> dict[str, Any]:
 
     user_reviewed = "no"
     latest_review_state = "none"
+    review_summary: dict[str, list[str]] = {
+        "approved_by": [],
+        "changes_requested_by": [],
+        "commented_by": [],
+    }
     if subject_type == "PullRequest" and subject_url and not enriched.get("inaccessible"):
+        review_summary = tools.fetch_review_summary(subject_url, host)
         login = logins.get(host, "")
         if login:
             own = tools.fetch_review_state(subject_url, host, login=login, exclude=False)
@@ -177,6 +198,7 @@ def _enrich(notif: dict[str, Any], logins: dict[str, str]) -> dict[str, Any]:
         "html_url": enriched.get("html_url", notif.get("subject_url", "")),
         "user_reviewed": user_reviewed,
         "latest_review_state": latest_review_state,
+        "review_summary": review_summary,
         "latest_comment": latest_comment,
     }
 
@@ -212,6 +234,17 @@ def render_item_subtree(item: dict[str, Any], render: ItemRender, level: int) ->
     if is_pr:
         reviewers = enriched.get("requested_reviewers") or []
         rows.append(("Reviewers", ", ".join(reviewers) if reviewers else "—"))
+        review_summary = item.get("review_summary") or {}
+        approved_by = review_summary.get("approved_by") or []
+        # "Reviewed by" = anyone who left a review but hasn't approved (commented
+        # or requested changes) — so the user can see a PR was looked at without
+        # yet being approved.
+        reviewed_by = (review_summary.get("changes_requested_by") or []) + (
+            review_summary.get("commented_by") or []
+        )
+        rows.append(("Approved by", ", ".join(approved_by) if approved_by else "—"))
+        rows.append(("Reviewed by", ", ".join(reviewed_by) if reviewed_by else "—"))
+        rows.append(("Merge queue", _merge_queue_summary(enriched)))
     labels = enriched.get("labels") or []
     rows.append(("Labels", ", ".join(labels) if labels else "—"))
     rows.append(("Milestone", str(enriched.get("milestone") or "—")))
@@ -361,6 +394,15 @@ def run_pipeline(user_request: str = "") -> RunSummary:
             enriched = item.get("enriched", {})
             comment = item.get("latest_comment") or {}
             why = REASON_DISPLAY.get(item.get("reason", ""), "Repo activity")
+            # Surface review + merge-queue status to the model alongside the raw
+            # PR fields so the summary can mention "approved by X" / "in merge queue".
+            details = {
+                **enriched,
+                "review_summary": item.get("review_summary", {}),
+                "merge_queue_status": _merge_queue_summary(enriched)
+                if item.get("subject_type") == "PullRequest"
+                else "n/a",
+            }
             render_thunk = m_render.instruct(
                 "Summarise this GitHub {{ subject_type }} for a triage inbox.\n"
                 "Title: {{ title }}\n"
@@ -373,14 +415,17 @@ def run_pipeline(user_request: str = "") -> RunSummary:
                 "issue/PR is about, its current state, and any open questions or "
                 "blockers. Use concrete details from the subject and latest comment "
                 "(reviewers, labels, milestone, CI/merge state) rather than restating "
-                "the title. Then write a one-line 'why you're seeing this' (use the "
+                "the title. For PRs, note approval status (who has approved, from "
+                "review_summary.approved_by) and whether it is in the merge queue or "
+                "has auto-merge enabled (merge_queue_status) when relevant. Then write "
+                "a one-line 'why you're seeing this' (use the "
                 "reason given), and a one-line latest-activity note (who did what, with "
                 "a short quoted excerpt if it clarifies the ask).",
                 user_variables={
                     "subject_type": str(item.get("subject_type", "")),
                     "title": str(item.get("title", "")),
                     "repo": str(item.get("repo_full_name", "")),
-                    "details": str(enriched),
+                    "details": str(details),
                     "comment": str(comment),
                     "why": str(why),
                 },

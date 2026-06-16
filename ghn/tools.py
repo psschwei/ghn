@@ -131,7 +131,9 @@ _PR_JQ = (
     "user: .user.login, requested_reviewers: [.requested_reviewers[].login], "
     "assignees: [.assignees[].login], labels: [.labels[].name], "
     "milestone: .milestone.title, review_comments: .review_comments, "
-    "comments: .comments, mergeable_state: .mergeable_state}"
+    "comments: .comments, mergeable_state: .mergeable_state, "
+    "auto_merge: (.auto_merge != null), "
+    "auto_merge_enabled_by: .auto_merge.enabled_by.login}"
 )
 
 _ISSUE_JQ = (
@@ -184,6 +186,42 @@ def fetch_review_state(subject_url: str, host: str, *, login: str, exclude: bool
     except (GitHubToolError, json.JSONDecodeError):
         return "none"
     return str(state) if state else "none"
+
+
+# --- review summary: who approved / reviewed (additive to fetch_review_state) -
+
+def fetch_review_summary(subject_url: str, host: str) -> dict[str, list[str]]:
+    """Summarise a PR's reviews by their authors' latest review state.
+
+    Hits ``{subject_url}/reviews`` and collapses each reviewer's review history to
+    their *most recent* review (re-reviews: the last one wins), then groups the
+    logins by terminal state:
+
+      - ``approved_by``           — reviewers whose latest review is APPROVED
+      - ``changes_requested_by``  — reviewers whose latest review is CHANGES_REQUESTED
+      - ``commented_by``          — reviewers who left a review comment but neither
+                                    approved nor blocked (state COMMENTED)
+
+    This lets the summary distinguish "approved by X" from "X looked but hasn't
+    approved". Returns empty lists on error so callers can render "—" and continue.
+    """
+    jq = (
+        "[ group_by(.user.login)[] | (sort_by(.submitted_at) | last) ] | {"
+        'approved_by: [.[] | select(.state == "APPROVED") | .user.login], '
+        'changes_requested_by: [.[] | select(.state == "CHANGES_REQUESTED") | .user.login], '
+        'commented_by: [.[] | select(.state == "COMMENTED") | .user.login]'
+        "}"
+    )
+    empty: dict[str, list[str]] = {
+        "approved_by": [],
+        "changes_requested_by": [],
+        "commented_by": [],
+    }
+    try:
+        result = _gh_json(["api", f"{subject_url}/reviews", "--jq", jq], host=host)
+    except (GitHubToolError, json.JSONDecodeError):
+        return empty
+    return result if isinstance(result, dict) else empty
 
 
 # --- elem_015: latest comment -------------------------------------------------
