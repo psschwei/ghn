@@ -431,16 +431,16 @@ def render_activity_delta(
     """Append a dated new-activity delta to a carried-over item block (Step 5/6).
 
     Keeps the original item subtree verbatim except for (1) re-leveling its headings so the
-    item heading sits at ``level - 1`` (the item may have been re-bucketed to a different
-    depth) and (2) advancing its :LAST_SEEN: to the notification's updated_at. Then appends
-    an ``Update <timestamp>`` heading at ``level``, holding only the prose describing what
-    changed since last run.
+    item heading sits at ``level`` (the item may have been re-bucketed to a different depth)
+    and (2) advancing its :LAST_SEEN: to the notification's updated_at. Then appends the
+    new-activity prose inline under the item heading as an ``*Update <timestamp>:*`` line
+    (mirroring ``*Latest activity:*``) — NOT a child heading, so it stays part of the parent
+    item rather than splitting off its own org section.
     """
-    releveled = _relevel_block(prev_block.rstrip("\n"), target_top_level=level - 1)
+    releveled = _relevel_block(prev_block.rstrip("\n"), target_top_level=level)
     bumped = _bump_last_seen(releveled, str(item.get("updated_at") or ""))
-    stars = "*" * level
     indent = " " * (level + 1)
-    out = [bumped, "", f"{stars} Update {timestamp}", f"{indent}{delta.delta}", ""]
+    out = [bumped, "", f"{indent}*Update {timestamp}:* {delta.delta}", ""]
     return "\n".join(out)
 
 
@@ -721,12 +721,12 @@ def run_pipeline(user_request: str = "") -> RunSummary:
         for item, render in rendered.values()
     ]
     for url, (item, delta) in delta_rendered.items():
-        # The delta "Update" heading sits one level below the item heading.
+        # The delta is appended inline under the item heading (no child heading).
         merged.append(
             (
                 item,
                 render_activity_delta(
-                    existing[url]["block"], item, delta, timestamp, level=_item_level(item) + 1
+                    existing[url]["block"], item, delta, timestamp, level=_item_level(item)
                 ),
             )
         )
