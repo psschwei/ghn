@@ -254,6 +254,7 @@ def _enrich(
 
     user_reviewed = "no"
     latest_review_state = "none"
+    is_requested_reviewer = False
     review_summary: dict[str, list[str]] = {
         "approved_by": [],
         "changes_requested_by": [],
@@ -265,6 +266,11 @@ def _enrich(
         if login:
             own = tools.fetch_review_state(subject_url, host, login=login, exclude=False)
             user_reviewed = "yes" if own and own != "none" else "no"
+            # GitHub still listing the user in requested_reviewers means it is actively
+            # asking them to review — authoritative regardless of the notification reason
+            # (which flips from review_requested to comment once the user comments).
+            requested = [r.lower() for r in (enriched.get("requested_reviewers") or [])]
+            is_requested_reviewer = login.lower() in requested
             if notif.get("reason") == "author":
                 latest_review_state = tools.fetch_review_state(
                     subject_url, host, login=login, exclude=True
@@ -297,6 +303,7 @@ def _enrich(
         "html_url": html_url,
         "user_reviewed": user_reviewed,
         "latest_review_state": latest_review_state,
+        "is_requested_reviewer": is_requested_reviewer,
         "review_summary": review_summary,
         "latest_comment": latest_comment,
         "is_new": is_new,
@@ -557,6 +564,12 @@ def run_pipeline(user_request: str = "") -> RunSummary:
             pr_state = _pr_state_summary(enriched)
             if pr_state in ("closed", "merged", "draft"):
                 item["bucket"] = "fyi"
+                continue
+            # An outstanding review request on a live PR is unambiguously Action Required,
+            # whatever the notification reason says — GitHub flips review_requested to
+            # comment once the user comments, which would otherwise demote it to FYI.
+            if item.get("is_requested_reviewer"):
+                item["bucket"] = "action_required"
                 continue
             comment_body = str((item.get("latest_comment") or {}).get("body", ""))
             item["bucket"] = str(

@@ -79,8 +79,11 @@ conventions:
   (`ItemRender`, `ActivityDelta`, `RunSummary`, and each slot) gets its own
   `start_session()`. Don't share a session across different schemas.
 - **Buckets are Action Required / Should Check / FYI.** Closed/merged items and draft PRs
-  are forced to FYI deterministically in `pipeline.py` (no model call); everything else is
-  classified by the `classify_bucket` slot.
+  are forced to FYI deterministically in `pipeline.py` (no model call); a live PR where the
+  user is still a requested reviewer is forced to Action Required deterministically (the
+  notification `reason` flips from `review_requested` to `comment` once the user comments,
+  so we key off `requested_reviewers`, not `reason`); everything else is classified by the
+  `classify_bucket` slot.
 
 ## Multi-host support
 

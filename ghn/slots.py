@@ -53,6 +53,11 @@ def classify_bucket(
     "CHANGES_REQUESTED", or "none"); `latest_comment_text` is the most recent comment body
     (may be empty).
 
+    Note: an outstanding review request (the user is still listed in the PR's
+    requested_reviewers) is forced to "action_required" deterministically upstream in
+    pipeline.py — you will not be called for those, so you need not infer it from `reason`
+    (GitHub flips `reason` from "review_requested" to "comment" once the user comments).
+
     Set `result` to one of:
       - "action_required" if ANY of:
           * reason is "review_requested" AND user_reviewed is "no" AND the PR is not
