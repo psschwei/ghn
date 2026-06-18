@@ -335,8 +335,11 @@ def render_item_subtree(item: dict[str, Any], render: ItemRender, level: int) ->
     lines.append(f"{indent}{item.get('html_url', '')}")
     lines.append("")
 
+    # For PRs, collapse draft/merged into the State word (raw .state is just
+    # "open"/"closed" and would show a draft PR as "open"); Issues keep raw .state.
+    state_value = _pr_state_summary(enriched) if is_pr else str(enriched.get("state", "unknown"))
     rows = [
-        ("State", str(enriched.get("state", "unknown"))),
+        ("State", state_value),
         ("Author", str(enriched.get("user", "unknown"))),
     ]
     if is_pr:

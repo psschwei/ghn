@@ -15,6 +15,9 @@ was generated from a `SKILL.md` spec, which is why source comments carry `elem_*
 provenance markers and `PROVENANCE:` references. The same workflow is also packaged as a
 Claude Code agent (`.claude/agents/github-notifications.md`).
 
+> **Note:** `.claude/agents/github-notifications.md` is here for reference only. Do not
+> update it.
+
 ## Commands
 
 Managed with [uv](https://docs.astral.sh/uv/).
