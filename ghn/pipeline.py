@@ -392,8 +392,9 @@ _BLOCK_HEADING_RE = re.compile(r"^(\*+)(\s+.*)$", re.MULTILINE)
 def _relevel_block(block: str, target_top_level: int) -> str:
     """Shift every heading in a carried block so its top heading sits at target level.
 
-    When a known item is re-bucketed (e.g. FYI -> Action Required), its heading depth must
-    change to nest correctly under the new bucket. We compute the block's current top
+    Items now always sit at level 2 directly under their `*` priority bucket, but a
+    carried block may have been written by an older run at a different depth (e.g. level 3
+    under the retired FYI `** Pull Requests` grouping). We compute the block's current top
     heading depth and apply the same delta to all headings in the block, clamping at 1 so
     headings never lose all their stars.
     """
@@ -460,42 +461,23 @@ def render_inbox_org(
 ) -> str:
     """Assemble the full Org-mode inbox document (Step 6).
 
-    ``buckets`` maps "action_required"/"should_check"/"fyi_prs"/"fyi_issues" to lists
-    of pre-rendered item subtree strings. Empty buckets get the italic placeholder.
+    ``buckets`` maps "high"/"medium"/"low" to lists of pre-rendered item subtree
+    strings. Each is a flat list under its ``*`` priority heading; empty buckets get
+    the italic placeholder.
     """
     out = [f"#+TITLE: {ORG_TITLE}", f"#+DATE: {timestamp}", ""]
 
-    out.append("* Action Required")
-    if buckets.get("action_required"):
-        out.extend(buckets["action_required"])
-    else:
-        out.append(EMPTY_BUCKET_PLACEHOLDER)
-        out.append("")
-
-    out.append("* Should Check")
-    if buckets.get("should_check"):
-        out.extend(buckets["should_check"])
-    else:
-        out.append(EMPTY_BUCKET_PLACEHOLDER)
-        out.append("")
-
-    out.append("* FYI")
-    if buckets.get("fyi_prs") or buckets.get("fyi_issues"):
-        out.append("** Pull Requests")
-        if buckets.get("fyi_prs"):
-            out.extend(buckets["fyi_prs"])
+    for key, heading in (
+        ("high", "* High Priority"),
+        ("medium", "* Medium Priority"),
+        ("low", "* Low Priority"),
+    ):
+        out.append(heading)
+        if buckets.get(key):
+            out.extend(buckets[key])
         else:
             out.append(EMPTY_BUCKET_PLACEHOLDER)
             out.append("")
-        out.append("** Issues")
-        if buckets.get("fyi_issues"):
-            out.extend(buckets["fyi_issues"])
-        else:
-            out.append(EMPTY_BUCKET_PLACEHOLDER)
-            out.append("")
-    else:
-        out.append(EMPTY_BUCKET_PLACEHOLDER)
-        out.append("")
 
     return "\n".join(out).rstrip() + "\n"
 
@@ -544,7 +526,7 @@ def run_pipeline(user_request: str = "") -> RunSummary:
             new_count=0,
             refreshed_count=0,
             carried_over_count=carried,
-            most_important="No Action Required items changed this run.",
+            most_important="No High Priority items changed this run.",
             reminder=(
                 f"Items stay in {INBOX_PATH} until you remove them by hand."
             ),
@@ -556,27 +538,26 @@ def run_pipeline(user_request: str = "") -> RunSummary:
 
     # Step 5 (classify): bucket each item. classify_bucket's response model is one
     # schema type, so a single dedicated session is safe for all bucket calls (KB5).
-    # Closed/merged issues+PRs and draft PRs are forced to FYI deterministically —
+    # Closed/merged issues+PRs and draft PRs are forced to Low Priority deterministically —
     # these are unambiguous and we don't burn a model call (or trust the 3B model) on them.
     with start_session(BACKEND, MODEL_ID) as m_bucket:
         for item in enriched_items:
             enriched = item.get("enriched", {})
             pr_state = _pr_state_summary(enriched)
             if pr_state in ("closed", "merged", "draft"):
-                item["bucket"] = "fyi"
+                item["bucket"] = "low"
                 continue
-            # An outstanding review request on a live PR is unambiguously Action Required,
+            # An outstanding review request on a live PR is unambiguously High Priority,
             # whatever the notification reason says — GitHub flips review_requested to
-            # comment once the user comments, which would otherwise demote it to FYI.
+            # comment once the user comments, which would otherwise demote it to Low.
             if item.get("is_requested_reviewer"):
-                item["bucket"] = "action_required"
+                item["bucket"] = "high"
                 continue
             comment_body = str((item.get("latest_comment") or {}).get("body", ""))
             item["bucket"] = str(
                 classify_bucket(
                     m_bucket,
                     reason=item.get("reason", ""),
-                    subject_type=item.get("subject_type", ""),
                     pr_state=pr_state,
                     user_reviewed=item.get("user_reviewed", "no"),
                     latest_review_state=item.get("latest_review_state", "none"),
@@ -707,28 +688,26 @@ def run_pipeline(user_request: str = "") -> RunSummary:
     carried_over_count = len(carried_urls)
 
     buckets: dict[str, list[str]] = {
-        "action_required": [],
-        "should_check": [],
-        "fyi_prs": [],
-        "fyi_issues": [],
+        "high": [],
+        "medium": [],
+        "low": [],
     }
-    action_required_titles: list[str] = []
+    high_priority_titles: list[str] = []
 
     def _place(item: dict[str, Any], block: str) -> None:
-        """Route a rendered block into its bucket; record Action Required titles."""
-        bucket = item.get("bucket", "fyi")
-        if bucket == "action_required":
-            buckets["action_required"].append(block)
-            action_required_titles.append(str(item.get("title", "")))
-        elif bucket == "should_check":
-            buckets["should_check"].append(block)
-        else:  # fyi — grouped by type at level 3
-            key = "fyi_prs" if item.get("subject_type") == "PullRequest" else "fyi_issues"
-            buckets[key].append(block)
+        """Route a rendered block into its priority bucket; record High Priority titles."""
+        bucket = item.get("bucket", "low")
+        if bucket == "high":
+            buckets["high"].append(block)
+            high_priority_titles.append(str(item.get("title", "")))
+        elif bucket == "medium":
+            buckets["medium"].append(block)
+        else:  # low — flat list
+            buckets["low"].append(block)
 
-    # Item heading depth: level 2 in Action Required / Should Check, level 3 in FYI.
+    # Item heading depth: every item is a level-2 heading directly under its `*` bucket.
     def _item_level(item: dict[str, Any]) -> int:
-        return 3 if item.get("bucket", "fyi") == "fyi" else 2
+        return 2
 
     # Full-render and delta items together, sorted by latest activity (most recent first).
     timestamp = current_timestamp()
@@ -752,16 +731,11 @@ def run_pipeline(user_request: str = "") -> RunSummary:
     ):
         _place(item, block)
 
-    # Carried-over items keep their original subtree text verbatim. We append them to
-    # FYI by default (their original bucket is preserved in the stored text); a fuller
-    # implementation would re-bucket from the stored drawer, but per Step 5 untouched
-    # items are not re-classified, so we preserve their text under FYI groupings.
+    # Carried-over items keep their original subtree text verbatim. Per Step 5 untouched
+    # items are not re-classified, so we place them under Low Priority by default rather
+    # than re-bucketing from the stored drawer.
     for url in carried_urls:
-        block = existing[url]["block"]
-        if "/pull/" in url:
-            buckets["fyi_prs"].append(block)
-        else:
-            buckets["fyi_issues"].append(block)
+        buckets["low"].append(existing[url]["block"])
 
     # Step 6: write the doc (BEFORE marking Done — the irreversible commit point).
     doc = render_inbox_org(buckets, current_timestamp())
@@ -780,9 +754,9 @@ def run_pipeline(user_request: str = "") -> RunSummary:
 
     # Step 8: conversational summary. RunSummary is its own schema -> own session (KB5).
     most_important = (
-        "; ".join(action_required_titles[:3])
-        if action_required_titles
-        else "No Action Required items this run."
+        "; ".join(high_priority_titles[:3])
+        if high_priority_titles
+        else "No High Priority items this run."
     )
     with start_session(BACKEND, MODEL_ID) as m_summary:
         summary_thunk = m_summary.instruct(
@@ -790,7 +764,7 @@ def run_pipeline(user_request: str = "") -> RunSummary:
             "New items added: {{ new }}\n"
             "Existing items updated with new activity (a dated delta was appended): {{ refreshed }}\n"
             "Items carried over untouched: {{ carried }}\n"
-            "Most important Action Required item(s): {{ important }}\n\n"
+            "Most important High Priority item(s): {{ important }}\n\n"
             "Include a one-line reminder that items stay in the inbox until removed by hand.",
             user_variables={
                 "new": str(new_count),

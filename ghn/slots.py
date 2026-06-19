@@ -2,7 +2,7 @@
 
 Two CLASSIFY slots requiring natural-language judgment:
   * classify_filter_mode (elem_006) — interpret the user's request into a filter mode.
-  * classify_bucket (elem_017) — decide which inbox bucket an enriched item belongs in.
+  * classify_bucket (elem_017) — decide which priority bucket an enriched item belongs in.
 
 Per KB6, ``m``/``context`` and other reserved names are never declared as parameters;
 ``m`` is passed as the first positional argument at call time in ``pipeline.py``.
@@ -36,30 +36,28 @@ def classify_filter_mode(user_request: str) -> Literal["all", "issues", "prs", "
 @generative
 def classify_bucket(
     reason: str,
-    subject_type: str,
     pr_state: str,
     user_reviewed: str,
     latest_review_state: str,
     latest_comment_text: str,
-) -> Literal["action_required", "should_check", "fyi"]:
-    """Classify a single enriched notification into one inbox bucket.
+) -> Literal["high", "medium", "low"]:
+    """Classify a single enriched notification into one priority bucket.
 
     Inputs describe the notification: `reason` is the GitHub notification reason
     (assign, review_requested, mention, author, comment, team_mention, subscribed,
-    state_change, ci_activity); `subject_type` is Issue or PullRequest; `pr_state`
-    summarises the PR (e.g. "open", "draft", "closed", "merged", or "n/a" for issues);
-    `user_reviewed` is "yes"/"no" for whether the user already submitted a review;
-    `latest_review_state` is the latest review state from others (e.g. "APPROVED",
-    "CHANGES_REQUESTED", or "none"); `latest_comment_text` is the most recent comment body
-    (may be empty).
+    state_change, ci_activity); `pr_state` summarises the PR (e.g. "open", "draft",
+    "closed", "merged", or "n/a" for issues); `user_reviewed` is "yes"/"no" for whether
+    the user already submitted a review; `latest_review_state` is the latest review state
+    from others (e.g. "APPROVED", "CHANGES_REQUESTED", or "none"); `latest_comment_text`
+    is the most recent comment body (may be empty).
 
     Note: an outstanding review request (the user is still listed in the PR's
-    requested_reviewers) is forced to "action_required" deterministically upstream in
-    pipeline.py — you will not be called for those, so you need not infer it from `reason`
-    (GitHub flips `reason` from "review_requested" to "comment" once the user comments).
+    requested_reviewers) is forced to "high" deterministically upstream in pipeline.py —
+    you will not be called for those, so you need not infer it from `reason` (GitHub flips
+    `reason` from "review_requested" to "comment" once the user comments).
 
     Set `result` to one of:
-      - "action_required" if ANY of:
+      - "high" if ANY of:
           * reason is "review_requested" AND user_reviewed is "no" AND the PR is not
             draft, not closed, and not merged;
           * reason is "assign";
@@ -67,17 +65,17 @@ def classify_bucket(
             directed at the user;
           * reason is "author" AND the latest comment is a question or a review requesting
             changes on the user's PR — but NOT if latest_review_state is "APPROVED".
-      - "should_check" if:
+      - "medium" if:
           * reason is "author" with new activity (comments, approvals);
           * reason is "comment" and the conversation is ongoing;
           * reason is "mention" but it is informational (not a direct question);
           * reason is "team_mention";
           * reason is "ci_activity" on the user's own PR and CI is failing.
-      - "fyi" for everything else (subscribed repo activity, state changes on watched things).
+      - "low" for everything else (subscribed repo activity, state changes on watched things).
 
-    Any closed or merged issue/PR, and any draft PR, always belongs in "fyi"
+    Any closed or merged issue/PR, and any draft PR, always belongs in "low"
     regardless of reason — there is no live action to take on it.
 
-    An approved PR the user authored belongs in "should_check", never "action_required".
+    An approved PR the user authored belongs in "medium", never "high".
     """
     ...

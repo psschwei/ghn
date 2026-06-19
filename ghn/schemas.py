@@ -52,7 +52,7 @@ class RunSummary(BaseModel):
     refreshed_count: int = Field(description="How many existing items were regenerated due to new activity.")
     carried_over_count: int = Field(description="How many existing items were carried over untouched.")
     most_important: str = Field(
-        description="The most important Action Required item(s), or a note that there are none.",
+        description="The most important High Priority item(s), or a note that there are none.",
     )
     reminder: str = Field(
         description="A reminder that items stay in the inbox until removed by hand from the inbox doc (~/org/github.org by default).",
@@ -63,5 +63,5 @@ class RunSummary(BaseModel):
 # as the canonical Literal so pipeline.py and main.py share one definition.
 FilterMode = Literal["all", "issues", "prs", "review_requests"]
 
-# Inbox bucket produced by the classify_bucket slot (elem_017).
-Bucket = Literal["action_required", "should_check", "fyi"]
+# Inbox priority bucket produced by the classify_bucket slot (elem_017).
+Bucket = Literal["high", "medium", "low"]
