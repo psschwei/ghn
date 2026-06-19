@@ -388,6 +388,17 @@ _LAST_SEEN_LINE_RE = re.compile(r"^(\s*):LAST_SEEN:\s.*$", re.MULTILINE)
 _URL_LINE_RE = re.compile(r"^(\s*):URL:\s.*$", re.MULTILINE)
 _BLOCK_HEADING_RE = re.compile(r"^(\*+)(\s+.*)$", re.MULTILINE)
 
+# A stale ``*** Update <timestamp>`` org *heading* (heading line + its indented body) left in
+# the doc by a pre-fix run. The heading line is ``<stars> <space> Update <rest-of-line>`` at the
+# start of a line; the body is every following line up to the next heading or end of block.
+# Deltas are now inline ``*Update <ts>:*`` prose (see render_activity_delta) — this regex only
+# matches the broken heading form (note the *space* after the stars), never the inline form,
+# which is indented and has ``*Update`` with no space before "Update".
+_STALE_UPDATE_HEADING_RE = re.compile(
+    r"^\*+[ \t]+Update[ \t]+(?P<ts>.*?)[ \t]*\n(?P<body>(?:(?!\*+[ \t]).*(?:\n|$))*)",
+    re.MULTILINE,
+)
+
 
 def _relevel_block(block: str, target_top_level: int) -> str:
     """Shift every heading in a carried block so its top heading sits at target level.
@@ -411,6 +422,29 @@ def _relevel_block(block: str, target_top_level: int) -> str:
         return ("*" * new_depth) + m.group(2)
 
     return _BLOCK_HEADING_RE.sub(_shift, block)
+
+
+def _normalize_stale_update_headings(block: str, level: int) -> str:
+    """Heal a carried-over block written by a pre-fix run that used ``*** Update`` headings.
+
+    Older runs rendered the new-activity delta as a child org heading (``*** Update <ts>``
+    followed by the indented prose). Updates must never be a subheading — they belong inline
+    under the item, mirroring ``render_activity_delta``. This rewrites each such heading-block
+    into a single ``*Update <ts>:* <body>`` line at the item's indent (``level + 1`` spaces),
+    collapsing the indented body to one line. The inline form current runs already produce is
+    left untouched (it isn't an org heading, so it doesn't match).
+    """
+    indent = " " * (level + 1)
+
+    def _inline(m: re.Match[str]) -> str:
+        ts = m.group("ts").strip()
+        body = " ".join(line.strip() for line in m.group("body").splitlines() if line.strip())
+        line = f"{indent}*Update {ts}:*"
+        if body:
+            line += f" {body}"
+        return line + "\n"
+
+    return _STALE_UPDATE_HEADING_RE.sub(_inline, block)
 
 
 def _bump_last_seen(block: str, new_last_seen: str) -> str:
@@ -449,9 +483,12 @@ def render_activity_delta(
     item rather than splitting off its own org section.
     """
     releveled = _relevel_block(prev_block.rstrip("\n"), target_top_level=level)
-    bumped = _bump_last_seen(releveled, str(item.get("updated_at") or ""))
+    # Heal any stale ``*** Update`` heading a pre-fix run left in the carried block, so the
+    # item carries only inline update lines before we append the newest one.
+    healed = _normalize_stale_update_headings(releveled, level)
+    bumped = _bump_last_seen(healed, str(item.get("updated_at") or ""))
     indent = " " * (level + 1)
-    out = [bumped, "", f"{indent}*Update {timestamp}:* {delta.delta}", ""]
+    out = [bumped.rstrip("\n"), "", f"{indent}*Update {timestamp}:* {delta.delta}", ""]
     return "\n".join(out)
 
 
@@ -733,9 +770,12 @@ def run_pipeline(user_request: str = "") -> RunSummary:
 
     # Carried-over items keep their original subtree text verbatim. Per Step 5 untouched
     # items are not re-classified, so we place them under Low Priority by default rather
-    # than re-bucketing from the stored drawer.
+    # than re-bucketing from the stored drawer. We still heal any stale ``*** Update``
+    # heading a pre-fix run left behind so it can never resurface as a subheading.
     for url in carried_urls:
-        buckets["low"].append(existing[url]["block"])
+        buckets["low"].append(
+            _normalize_stale_update_headings(existing[url]["block"], level=_item_level({}))
+        )
 
     # Step 6: write the doc (BEFORE marking Done — the irreversible commit point).
     doc = render_inbox_org(buckets, current_timestamp())
