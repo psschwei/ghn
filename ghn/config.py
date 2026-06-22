@@ -75,7 +75,15 @@ GITHUB_HOSTS: Final[tuple[str, ...]] = (
 
 # === C8: Runtime Environment ===
 BACKEND: Final[str] = 'ollama'
-MODEL_ID: Final[str] = 'granite4.1:3b'
+# Granite size drives summary quality: the 3B model hallucinates details and drops
+# key context under the dense, multi-clause summary prompts. 8B is the default; bump to
+# granite4.1:30b for the best quality, or set GHN_MODEL_ID back to granite4.1:3b to compare.
+MODEL_ID: Final[str] = os.environ.get('GHN_MODEL_ID', 'granite4.1:8b')
+
+# Classification (filter mode, priority bucket) is a small fixed-label pick, not prose —
+# 3B handles it fine, so we keep it on the cheaper/faster model rather than paying 8B
+# latency. Override with GHN_CLASSIFIER_MODEL_ID (e.g. to match MODEL_ID for comparison).
+CLASSIFIER_MODEL_ID: Final[str] = os.environ.get('GHN_CLASSIFIER_MODEL_ID', 'granite4.1:3b')
 
 LOOP_BUDGET: Final[int] = 3
 

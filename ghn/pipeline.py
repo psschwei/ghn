@@ -31,6 +31,7 @@ from pydantic import BaseModel
 
 from .config import (
     BACKEND,
+    CLASSIFIER_MODEL_ID,
     EMPTY_BUCKET_PLACEHOLDER,
     GITHUB_COM_HOST,
     GITHUB_HOSTS,
@@ -548,7 +549,8 @@ def run_pipeline(user_request: str = "") -> RunSummary:
 
     # Step 3 (filter): classify the user's request into a filter mode.
     # Each @generative slot defines its own response model — give it its own session (KB5).
-    with start_session(BACKEND, MODEL_ID) as m_filter:
+    # Classification is a small fixed-label pick, so it runs on the cheaper CLASSIFIER_MODEL_ID.
+    with start_session(BACKEND, CLASSIFIER_MODEL_ID) as m_filter:
         filter_mode = classify_filter_mode(m_filter, user_request=user_request or "")
     filter_mode = str(filter_mode)
 
@@ -577,7 +579,8 @@ def run_pipeline(user_request: str = "") -> RunSummary:
     # schema type, so a single dedicated session is safe for all bucket calls (KB5).
     # Closed/merged issues+PRs and draft PRs are forced to Low Priority deterministically —
     # these are unambiguous and we don't burn a model call (or trust the 3B model) on them.
-    with start_session(BACKEND, MODEL_ID) as m_bucket:
+    # Bucketing is fixed-label classification, so it runs on the cheaper CLASSIFIER_MODEL_ID.
+    with start_session(BACKEND, CLASSIFIER_MODEL_ID) as m_bucket:
         for item in enriched_items:
             enriched = item.get("enriched", {})
             pr_state = _pr_state_summary(enriched)
