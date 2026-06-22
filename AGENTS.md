@@ -12,11 +12,7 @@ removed by hand.
 
 It is a [Mellea](https://github.com/generative-computing/mellea)-compiled skill: the code
 was generated from a `SKILL.md` spec, which is why source comments carry `elem_*` / `KB*`
-provenance markers and `PROVENANCE:` references. The same workflow is also packaged as a
-Claude Code agent (`.claude/agents/github-notifications.md`).
-
-> **Note:** `.claude/agents/github-notifications.md` is here for reference only. Do not
-> update it.
+provenance markers and `PROVENANCE:` references.
 
 ## Commands
 

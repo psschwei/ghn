@@ -24,5 +24,4 @@ ghn
 ```
 
 See [`docs/mellea-setup.md`](docs/mellea-setup.md) for full setup (model backend, hosts)
-and [`docs/mellea-guide.md`](docs/mellea-guide.md) for the complete guide. The
-same workflow is also packaged as a [Claude Code agent](docs/claude-agent.md).
+and [`docs/mellea-guide.md`](docs/mellea-guide.md) for the complete guide.
