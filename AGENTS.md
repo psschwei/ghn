@@ -74,6 +74,14 @@ conventions:
 - **One Pydantic schema per Mellea session (KB5).** Each distinct structured output
   (`ItemRender`, `ActivityDelta`, `RunSummary`, and each slot) gets its own
   `start_session()`. Don't share a session across different schemas.
+- **The `:NOTES:` property is user-owned and preserved verbatim.** Every item's
+  `:PROPERTIES:` drawer carries an always-present `:NOTES:` line (empty by default) the user
+  can type a note into. `loader.py` reads it (`_extract_prop(..., "NOTES")`), the pipeline
+  threads it through as `notes`, and `render_item_subtree` re-emits it. It survives all three
+  rebuild paths: full re-render re-emits the carried value; carried-over/delta-mode reuse the
+  block verbatim, and `_ensure_notes_line` back-fills an empty line onto pre-feature blocks
+  without ever touching a typed note. Never parse, rewrite, or act on this text — like
+  `:LAST_SEEN:`, it's drawer state the pipeline manages structurally, not content.
 - **Buckets are Action Required / Should Check / FYI.** Closed/merged items and draft PRs
   are forced to FYI deterministically in `pipeline.py` (no model call); a live PR where the
   user is still a requested reviewer is forced to Action Required deterministically (the

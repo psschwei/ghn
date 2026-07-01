@@ -311,6 +311,9 @@ def _enrich(
         "cutoff": cutoff,
         "new_comments": new_comments,
         "new_reviews": new_reviews,
+        # Any typed :NOTES: property value from the prior block (None for new items);
+        # re-emitted verbatim by render_item_subtree so a note survives a full re-render.
+        "notes": (prior or {}).get("notes"),
     }
 
 
@@ -319,10 +322,12 @@ def _enrich(
 def render_item_subtree(item: dict[str, Any], render: ItemRender, level: int) -> str:
     """Render one item subtree at the given heading depth (Step 6).
 
-    Emits: heading, :PROPERTIES: drawer (:URL: + :HOST: — REQUIRED in every section),
-    the raw html_url on its own line (for C-c C-o / link-open access), a metadata
-    table (Reviewers row omitted for Issues), the generated summary, the
-    "Why you're seeing this" line, and the "Latest activity" line.
+    Emits: heading, :PROPERTIES: drawer (:URL: + :HOST: — REQUIRED in every section — plus an
+    always-present :NOTES: line, empty by default, that the user can type a note into;
+    user-owned free text re-emitted verbatim so a typed note survives this full re-render),
+    the raw html_url on its own line (for C-c C-o / link-open access), a metadata table
+    (Reviewers row omitted for Issues), the generated summary, the "Why you're seeing this"
+    line, and the "Latest activity" line.
     """
     stars = "*" * level
     indent = " " * (level + 1)
@@ -339,6 +344,12 @@ def render_item_subtree(item: dict[str, Any], render: ItemRender, level: int) ->
     last_seen = str(item.get("updated_at") or "")
     if last_seen:
         lines.append(f"{indent}:LAST_SEEN: {last_seen}")
+    # :NOTES: is always emitted (empty by default) so the user can jot a note without
+    # remembering any syntax — just type after the colon. It's user-owned free text the
+    # pipeline never parses; a note the user typed is carried on `item["notes"]` and
+    # re-emitted here so it survives a full re-render.
+    notes = str(item.get("notes") or "")
+    lines.append(f"{indent}:NOTES: {notes}".rstrip())
     lines.append(f"{indent}:END:")
     lines.append(f"{indent}{item.get('html_url', '')}")
     lines.append("")
@@ -388,6 +399,11 @@ def render_item_subtree(item: dict[str, Any], render: ItemRender, level: int) ->
 _LAST_SEEN_LINE_RE = re.compile(r"^(\s*):LAST_SEEN:\s.*$", re.MULTILINE)
 _URL_LINE_RE = re.compile(r"^(\s*):URL:\s.*$", re.MULTILINE)
 _BLOCK_HEADING_RE = re.compile(r"^(\*+)(\s+.*)$", re.MULTILINE)
+# A :NOTES: property line (with or without a value); used to detect its presence.
+_NOTES_LINE_RE = re.compile(r"^(\s*):NOTES:(?:\s.*)?$", re.MULTILINE)
+# The :PROPERTIES: drawer's terminating :END: (first :END: at a property indent); we insert
+# an empty :NOTES: line just before it so pre-feature carried blocks gain the line, too.
+_DRAWER_END_RE = re.compile(r"^(\s*):END:\s*$", re.MULTILINE)
 
 # A stale ``*** Update <timestamp>`` org *heading* (heading line + its indented body) left in
 # the doc by a pre-fix run. The heading line is ``<stars> <space> Update <rest-of-line>`` at the
@@ -467,6 +483,25 @@ def _bump_last_seen(block: str, new_last_seen: str) -> str:
     return _URL_LINE_RE.sub(_insert, block, count=1)
 
 
+def _ensure_notes_line(block: str) -> str:
+    """Add an empty ``:NOTES:`` line to a carried block that predates the property.
+
+    A note the user has already typed is inside the block verbatim, so this is a no-op when
+    a ``:NOTES:`` line already exists (with or without a value) — it never touches user text.
+    Otherwise it inserts an empty ``:NOTES:`` line just before the :PROPERTIES: drawer's
+    closing ``:END:``, so older items gain the always-present notes slot on their first
+    refresh (mirroring how ``_bump_last_seen`` back-fills :LAST_SEEN:).
+    """
+    if _NOTES_LINE_RE.search(block):
+        return block
+
+    def _insert(m: re.Match[str]) -> str:
+        indent = m.group(1)
+        return f"{indent}:NOTES:\n{m.group(0)}"
+
+    return _DRAWER_END_RE.sub(_insert, block, count=1)
+
+
 def render_activity_delta(
     prev_block: str,
     item: dict[str, Any],
@@ -477,17 +512,18 @@ def render_activity_delta(
     """Append a dated new-activity delta to a carried-over item block (Step 5/6).
 
     Keeps the original item subtree verbatim except for (1) re-leveling its headings so the
-    item heading sits at ``level`` (the item may have been re-bucketed to a different depth)
-    and (2) advancing its :LAST_SEEN: to the notification's updated_at. Then appends the
-    new-activity prose inline under the item heading as an ``*Update <timestamp>:*`` line
-    (mirroring ``*Latest activity:*``) — NOT a child heading, so it stays part of the parent
-    item rather than splitting off its own org section.
+    item heading sits at ``level`` (the item may have been re-bucketed to a different depth),
+    (2) advancing its :LAST_SEEN: to the notification's updated_at, and (3) back-filling an
+    empty :NOTES: line if the carried block predates it (never touches a note the user
+    already typed). Then appends the new-activity prose inline under the item heading as an
+    ``*Update <timestamp>:*`` line (mirroring ``*Latest activity:*``) — NOT a child heading,
+    so it stays part of the parent item rather than splitting off its own org section.
     """
     releveled = _relevel_block(prev_block.rstrip("\n"), target_top_level=level)
     # Heal any stale ``*** Update`` heading a pre-fix run left in the carried block, so the
     # item carries only inline update lines before we append the newest one.
     healed = _normalize_stale_update_headings(releveled, level)
-    bumped = _bump_last_seen(healed, str(item.get("updated_at") or ""))
+    bumped = _ensure_notes_line(_bump_last_seen(healed, str(item.get("updated_at") or "")))
     indent = " " * (level + 1)
     out = [bumped.rstrip("\n"), "", f"{indent}*Update {timestamp}:* {delta.delta}", ""]
     return "\n".join(out)
@@ -771,14 +807,14 @@ def run_pipeline(user_request: str = "") -> RunSummary:
     ):
         _place(item, block)
 
-    # Carried-over items keep their original subtree text verbatim. Per Step 5 untouched
-    # items are not re-classified, so we place them under Low Priority by default rather
-    # than re-bucketing from the stored drawer. We still heal any stale ``*** Update``
-    # heading a pre-fix run left behind so it can never resurface as a subheading.
+    # Carried-over items keep their original subtree text verbatim (including any :NOTES:
+    # the user typed). Per Step 5 untouched items are not re-classified, so we place them
+    # under Low Priority by default rather than re-bucketing from the stored drawer. We heal
+    # any stale ``*** Update`` heading a pre-fix run left behind so it can never resurface as
+    # a subheading, and back-fill an empty :NOTES: line for blocks that predate it.
     for url in carried_urls:
-        buckets["low"].append(
-            _normalize_stale_update_headings(existing[url]["block"], level=_item_level({}))
-        )
+        healed = _normalize_stale_update_headings(existing[url]["block"], level=_item_level({}))
+        buckets["low"].append(_ensure_notes_line(healed))
 
     # Step 6: write the doc (BEFORE marking Done — the irreversible commit point).
     doc = render_inbox_org(buckets, current_timestamp())

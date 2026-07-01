@@ -2,7 +2,8 @@
 
   * read_existing_inbox (elem_005) — parse the existing inbox doc (config.INBOX_PATH) into
     a map keyed by :URL: (the html_url de-dup key) -> raw item subtree text + last-seen
-    timestamp (the per-item cutoff for the new-activity delta).
+    timestamp (the per-item cutoff for the new-activity delta) + any :NOTES: property text
+    (user-owned free text, preserved verbatim across runs).
   * read_doc_date (elem_005) — parse the doc-level ``#+DATE:`` header as a fallback cutoff
     for items written before per-item :LAST_SEEN: tracking existed.
   * parse_notification (elem_008) — project a raw gh notification JSON object into a
@@ -27,7 +28,7 @@ _DOC_DATE_RE = re.compile(r"^\s*#\+DATE:\s*(.+?)\s*$", re.IGNORECASE)
 
 
 def read_existing_inbox(inbox_path: str | Path) -> dict[str, dict[str, Any]]:
-    """Parse the existing inbox doc into ``{html_url: {"block": text, "last_seen": str|None}}``.
+    """Parse the existing inbox doc into ``{html_url: {"block", "last_seen", "notes"}}``.
 
     Each tracked item is an org heading (``**`` or ``***``) immediately followed by a
     ``:PROPERTIES:`` drawer holding a ``:URL:`` property (and, for items written by a
@@ -39,6 +40,11 @@ def read_existing_inbox(inbox_path: str | Path) -> dict[str, dict[str, Any]]:
     ``last_seen`` is the ISO-8601 cutoff for fetching new activity on the next run; it is
     ``None`` for items written before LAST_SEEN tracking existed (callers fall back to the
     doc-level ``#+DATE:`` header, see ``read_doc_date``).
+
+    ``notes`` is the value of the item's ``:NOTES:`` property, or ``None`` when the line is
+    empty/absent (an auto-emitted empty ``:NOTES:`` line reads as ``None`` — nothing to
+    carry). It is user-owned free text the pipeline never parses; it is threaded back through
+    and re-emitted so a note the user typed survives every rebuild path.
 
     Returns an empty map when the file does not exist (NO_EXISTING_INBOX).
     """
@@ -72,6 +78,7 @@ def read_existing_inbox(inbox_path: str | Path) -> dict[str, dict[str, Any]]:
             items[url] = {
                 "block": block,
                 "last_seen": _extract_prop(block_lines, "LAST_SEEN"),
+                "notes": _extract_prop(block_lines, "NOTES"),
             }
         i = j
     return items
