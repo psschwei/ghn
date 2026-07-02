@@ -144,6 +144,22 @@ _ISSUE_JQ = (
     "body: .body, created_at: .created_at}"
 )
 
+# Release and Discussion subjects have no assignees/milestone, so the issue jq
+# (which does ``[.assignees[].login]``) errors with "cannot iterate over: null".
+# These minimal projections pull only fields those endpoints actually return — most
+# importantly ``html_url``, which points at the github.com web page (releases/tag/…,
+# discussions/…) rather than the api.github.com subject URL from the notification.
+_RELEASE_JQ = (
+    "{html_url: .html_url, state: (if .draft then \"draft\" "
+    "elif .prerelease then \"prerelease\" else \"published\" end), "
+    "user: .author.login, body: .body, created_at: .created_at}"
+)
+
+_DISCUSSION_JQ = (
+    "{html_url: .html_url, state: .state, user: .user.login, "
+    "labels: [(.labels // [])[].name], body: .body, created_at: .created_at}"
+)
+
 
 def enrich_pull_request(subject_url: str, host: str) -> dict[str, Any]:
     """Fetch the projected PR fields for a notification subject (elem_012)."""
@@ -153,6 +169,24 @@ def enrich_pull_request(subject_url: str, host: str) -> dict[str, Any]:
 def enrich_issue(subject_url: str, host: str) -> dict[str, Any]:
     """Fetch the projected Issue fields for a notification subject (elem_014)."""
     return _gh_json(["api", subject_url, "--jq", _ISSUE_JQ], host=host) or {}
+
+
+def enrich_release(subject_url: str, host: str) -> dict[str, Any]:
+    """Fetch the projected Release fields for a notification subject.
+
+    The subject URL is ``repos/{o}/{r}/releases/{id}``; the response carries the
+    ``html_url`` of the release page (``…/releases/tag/{tag}``).
+    """
+    return _gh_json(["api", subject_url, "--jq", _RELEASE_JQ], host=host) or {}
+
+
+def enrich_discussion(subject_url: str, host: str) -> dict[str, Any]:
+    """Fetch the projected Discussion fields for a notification subject.
+
+    The subject URL is ``repos/{o}/{r}/discussions/{number}``; the response carries
+    the ``html_url`` of the discussion page (``…/discussions/{number}``).
+    """
+    return _gh_json(["api", subject_url, "--jq", _DISCUSSION_JQ], host=host) or {}
 
 
 def enrich_subject(subject_url: str, subject_type: str, host: str) -> dict[str, Any]:
@@ -165,6 +199,10 @@ def enrich_subject(subject_url: str, subject_type: str, host: str) -> dict[str, 
     try:
         if subject_type == "PullRequest":
             return enrich_pull_request(subject_url, host)
+        if subject_type == "Release":
+            return enrich_release(subject_url, host)
+        if subject_type == "Discussion":
+            return enrich_discussion(subject_url, host)
         return enrich_issue(subject_url, host)
     except (GitHubToolError, json.JSONDecodeError):
         return {"inaccessible": True}
