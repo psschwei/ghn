@@ -31,6 +31,7 @@ from pydantic import BaseModel
 
 from .config import (
     BACKEND,
+    BACKEND_KWARGS,
     CLASSIFIER_MODEL_ID,
     EMPTY_BUCKET_PLACEHOLDER,
     GITHUB_COM_HOST,
@@ -586,7 +587,7 @@ def run_pipeline(user_request: str = "") -> RunSummary:
     # Step 3 (filter): classify the user's request into a filter mode.
     # Each @generative slot defines its own response model — give it its own session (KB5).
     # Classification is a small fixed-label pick, so it runs on the cheaper CLASSIFIER_MODEL_ID.
-    with start_session(BACKEND, CLASSIFIER_MODEL_ID) as m_filter:
+    with start_session(BACKEND, CLASSIFIER_MODEL_ID, **BACKEND_KWARGS) as m_filter:
         filter_mode = classify_filter_mode(m_filter, user_request=user_request or "")
     filter_mode = str(filter_mode)
 
@@ -616,7 +617,7 @@ def run_pipeline(user_request: str = "") -> RunSummary:
     # Closed/merged issues+PRs and draft PRs are forced to Low Priority deterministically —
     # these are unambiguous and we don't burn a model call (or trust the 3B model) on them.
     # Bucketing is fixed-label classification, so it runs on the cheaper CLASSIFIER_MODEL_ID.
-    with start_session(BACKEND, CLASSIFIER_MODEL_ID) as m_bucket:
+    with start_session(BACKEND, CLASSIFIER_MODEL_ID, **BACKEND_KWARGS) as m_bucket:
         for item in enriched_items:
             enriched = item.get("enriched", {})
             pr_state = _pr_state_summary(enriched)
@@ -657,7 +658,7 @@ def run_pipeline(user_request: str = "") -> RunSummary:
     full_items = [it for it in enriched_items if not _is_delta_mode(it)]
     delta_items = [it for it in enriched_items if _is_delta_mode(it)]
 
-    with start_session(BACKEND, MODEL_ID) as m_render:
+    with start_session(BACKEND, MODEL_ID, **BACKEND_KWARGS) as m_render:
         for item in full_items:
             enriched = item.get("enriched", {})
             comment = item.get("latest_comment") or {}
@@ -722,7 +723,7 @@ def run_pipeline(user_request: str = "") -> RunSummary:
             rendered[url] = (item, render)
 
     # Step 5 (delta render): summarise ONLY the new activity for known items.
-    with start_session(BACKEND, MODEL_ID) as m_delta:
+    with start_session(BACKEND, MODEL_ID, **BACKEND_KWARGS) as m_delta:
         for item in delta_items:
             url = item.get("html_url", "")
             delta_thunk = m_delta.instruct(
@@ -837,7 +838,7 @@ def run_pipeline(user_request: str = "") -> RunSummary:
         if high_priority_titles
         else "No High Priority items this run."
     )
-    with start_session(BACKEND, MODEL_ID) as m_summary:
+    with start_session(BACKEND, MODEL_ID, **BACKEND_KWARGS) as m_summary:
         summary_thunk = m_summary.instruct(
             "Write a short, friendly summary of this GitHub inbox update.\n"
             "New items added: {{ new }}\n"

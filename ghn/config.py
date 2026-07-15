@@ -74,7 +74,35 @@ GITHUB_HOSTS: Final[tuple[str, ...]] = (
 )
 
 # === C8: Runtime Environment ===
-BACKEND: Final[str] = 'ollama'
+# Mellea backend to drive the models. Defaults to local Ollama; override with GHN_BACKEND
+# to point at any backend mellea supports ('ollama', 'hf', 'openai', 'watsonx', 'litellm').
+# Use 'openai' with GHN_BASE_URL to talk to OpenAI itself or any OpenAI-compatible server
+# (vLLM, LiteLLM proxy, a hosted gateway, etc.).
+BACKEND: Final[str] = os.environ.get('GHN_BACKEND', 'ollama')
+
+# Optional endpoint + credentials, threaded into every start_session() as backend kwargs.
+# GHN_BASE_URL works for both the Ollama and OpenAI-compatible backends (both accept
+# base_url); leave it unset to use the backend's own default (Ollama -> localhost:11434,
+# OpenAI -> the public API). GHN_API_KEY is only meaningful for the OpenAI/LiteLLM backends,
+# so it's only forwarded for those — Ollama's constructor rejects an unexpected kwarg.
+# The OpenAI backend also falls back to the standard OPENAI_API_KEY env var when unset.
+_BASE_URL: Final[str | None] = os.environ.get('GHN_BASE_URL') or None
+_API_KEY: Final[str | None] = os.environ.get('GHN_API_KEY') or None
+
+
+def _build_backend_kwargs() -> dict[str, str]:
+    kwargs: dict[str, str] = {}
+    if _BASE_URL:
+        kwargs['base_url'] = _BASE_URL
+    if _API_KEY and BACKEND in ('openai', 'litellm'):
+        kwargs['api_key'] = _API_KEY
+    return kwargs
+
+
+# Extra keyword args forwarded verbatim to the mellea backend constructor via
+# start_session(BACKEND, MODEL_ID, **BACKEND_KWARGS). Empty by default (pure Ollama).
+BACKEND_KWARGS: Final[dict[str, str]] = _build_backend_kwargs()
+
 # Granite size drives summary quality: the 3B model hallucinates details and drops
 # key context under the dense, multi-clause summary prompts. 8B is the default; bump to
 # granite4.1:30b for the best quality, or set GHN_MODEL_ID back to granite4.1:3b to compare.

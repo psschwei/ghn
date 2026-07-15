@@ -16,24 +16,55 @@ uv run python -c "from ghn import run_pipeline; print('ok')"
 
 ## §3 Model backend (C8)
 
-This package uses the Mellea **ollama** backend with model **`granite4.1:3b`** (declared
-in `ghn/config.py` as `BACKEND` and `MODEL_ID`).
+By default this package uses the Mellea **ollama** backend with two models: **`granite4.1:8b`**
+for summaries/rendering and the cheaper **`granite4.1:3b`** for fixed-label classification
+(filter mode + priority bucket). Defaults are declared in `ghn/config.py`; every knob is
+env-overridable, so you don't need to edit the source.
+
+### Local Ollama (default)
 
 1. Install and start [Ollama](https://ollama.com/).
-2. Pull the model:
+2. Pull both models:
 
    ```bash
+   ollama pull granite4.1:8b
    ollama pull granite4.1:3b
    ```
 
-3. Confirm it is available:
+3. Confirm they are available:
 
    ```bash
    ollama list | grep granite4.1
    ```
 
-To use a different backend or model, edit `BACKEND` / `MODEL_ID` in
-`ghn/config.py`.
+### Configuration knobs
+
+| Env var | Default | Purpose |
+| --- | --- | --- |
+| `GHN_BACKEND` | `ollama` | Mellea backend: `ollama`, `hf`, `openai`, `watsonx`, `litellm`. |
+| `GHN_MODEL_ID` | `granite4.1:8b` | Model for summaries / rendering. |
+| `GHN_CLASSIFIER_MODEL_ID` | `granite4.1:3b` | Cheaper model for classification. |
+| `GHN_BASE_URL` | *(backend default)* | Endpoint URL. Works for Ollama (e.g. a remote GPU box) **and** the OpenAI-compatible backends. |
+| `GHN_API_KEY` | *(unset)* | API key; forwarded only for the `openai` / `litellm` backends (ignored by Ollama). |
+
+The model-id strings are passed through verbatim — there's no tag-format validation — so
+when you point at a non-Ollama endpoint, set the model ids to names that endpoint serves.
+
+### Hosted / OpenAI-compatible endpoint
+
+To talk to OpenAI, a LiteLLM proxy, vLLM, or any OpenAI-compatible gateway, use the
+`openai` backend with a base URL and key:
+
+```bash
+export GHN_BACKEND=openai
+export GHN_BASE_URL=https://your-endpoint/v1
+export GHN_API_KEY=sk-...
+export GHN_MODEL_ID=claude-opus-4-8            # whatever the endpoint serves
+export GHN_CLASSIFIER_MODEL_ID=claude-haiku-4-5-20251001
+```
+
+(For Anthropic's native API rather than an OpenAI-compatible proxy, use
+`GHN_BACKEND=litellm` with a `claude-*` model id.)
 
 The inbox doc is written to `~/org/github.org` by default. Set the `GITHUB_INBOX_PATH`
 environment variable to write it elsewhere (a leading `~` is expanded). Its parent

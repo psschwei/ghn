@@ -34,7 +34,10 @@ config. Verify changes by running the pipeline.
 - **`gh` CLI**, authenticated (`gh auth login`). All GitHub access goes through it; no
   token is embedded. An unauthenticated host is silently skipped.
 - **Ollama** running with the model pulled: `ollama pull granite4.1:3b`. Backend/model are
-  set in `ghn/config.py` (`BACKEND` / `MODEL_ID`).
+  set in `ghn/config.py` (`BACKEND` / `MODEL_ID` / `CLASSIFIER_MODEL_ID`), all env-overridable.
+  To use a hosted or OpenAI-compatible endpoint instead of local Ollama, set `GHN_BACKEND=openai`
+  (or `litellm`) plus `GHN_BASE_URL` (endpoint) and `GHN_API_KEY`. `GHN_BASE_URL` also works for
+  Ollama (e.g. a remote GPU box); `GHN_API_KEY` is ignored by the Ollama backend.
 
 ## Architecture
 
@@ -58,7 +61,9 @@ conventions:
 - **`loader.py`** — pure text/JSON parsing: reads the existing inbox doc into a
   `{html_url: {block, last_seen}}` map and projects raw `gh` notification JSON.
 - **`config.py`** — scalar constants only (env-overridable: `GITHUB_INBOX_PATH`,
-  `GITHUB_ENTERPRISE_HOST`, `GHN_*_MAX_TOKENS`). Lookup *tables* live in `pipeline.py`, not here.
+  `GITHUB_ENTERPRISE_HOST`, `GHN_*_MAX_TOKENS`, `GHN_BACKEND`, `GHN_BASE_URL`, `GHN_API_KEY`,
+  `GHN_MODEL_ID`, `GHN_CLASSIFIER_MODEL_ID`). Lookup *tables* live in `pipeline.py`, not here.
+  `BACKEND_KWARGS` (a dict) is the one exception to scalar-only, built from the endpoint envs.
 
 ### Key invariants
 
