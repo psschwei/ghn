@@ -323,7 +323,8 @@ def _enrich(
 def render_item_subtree(item: dict[str, Any], render: ItemRender, level: int) -> str:
     """Render one item subtree at the given heading depth (Step 6).
 
-    Emits: heading, :PROPERTIES: drawer (:URL: + :HOST: — REQUIRED in every section — plus an
+    Emits: heading (tagged with the item's priority — ``:high:``/``:medium:``/``:low:``),
+    :PROPERTIES: drawer (:URL: + :HOST: — REQUIRED in every section — plus an
     always-present :NOTES: line, empty by default, that the user can type a note into;
     user-owned free text re-emitted verbatim so a typed note survives this full re-render),
     the raw html_url on its own line (for C-c C-o / link-open access), a metadata table
@@ -336,7 +337,11 @@ def render_item_subtree(item: dict[str, Any], render: ItemRender, level: int) ->
     host = _host_for(item)
     is_pr = item.get("subject_type") == "PullRequest"
 
-    lines = [f"{stars} {item.get('title', '(untitled)')}"]
+    # Priority is carried as an org tag on the heading (``:high:``/``:medium:``/``:low:``)
+    # rather than a subsection: the flat list's position implies importance, and the tag
+    # keeps it visible and searchable (C-c \ / agenda tag-match).
+    bucket = str(item.get("bucket", "low"))
+    lines = [f"{stars} {item.get('title', '(untitled)')} :{bucket}:"]
     lines.append(f"{indent}:PROPERTIES:")
     lines.append(f"{indent}:URL:  {item.get('html_url', '')}")
     lines.append(f"{indent}:HOST: {host}")
@@ -402,6 +407,12 @@ _URL_LINE_RE = re.compile(r"^(\s*):URL:\s.*$", re.MULTILINE)
 _BLOCK_HEADING_RE = re.compile(r"^(\*+)(\s+.*)$", re.MULTILINE)
 # A :NOTES: property line (with or without a value); used to detect its presence.
 _NOTES_LINE_RE = re.compile(r"^(\s*):NOTES:(?:\s.*)?$", re.MULTILINE)
+# The block's first (top) org heading, split into stars + the rest of the line, so we can
+# check for / append a priority tag. Only the first match is used.
+_FIRST_HEADING_RE = re.compile(r"^(\*+)[ \t]+(.*?)[ \t]*$", re.MULTILINE)
+# A trailing priority tag on a heading line (``... :high:`` / ``:medium:`` / ``:low:``),
+# possibly among other org tags (``:foo:high:``). Presence means "already tagged".
+_PRIORITY_TAG_RE = re.compile(r":(?:high|medium|low):[ \t]*$")
 # The :PROPERTIES: drawer's terminating :END: (first :END: at a property indent); we insert
 # an empty :NOTES: line just before it so pre-feature carried blocks gain the line, too.
 _DRAWER_END_RE = re.compile(r"^(\s*):END:\s*$", re.MULTILINE)
@@ -421,11 +432,12 @@ _STALE_UPDATE_HEADING_RE = re.compile(
 def _relevel_block(block: str, target_top_level: int) -> str:
     """Shift every heading in a carried block so its top heading sits at target level.
 
-    Items now always sit at level 2 directly under their `*` priority bucket, but a
-    carried block may have been written by an older run at a different depth (e.g. level 3
-    under the retired FYI `** Pull Requests` grouping). We compute the block's current top
-    heading depth and apply the same delta to all headings in the block, clamping at 1 so
-    headings never lose all their stars.
+    Items now always sit at level 1 (top-level `*` headings, priority carried as an org tag
+    rather than a subsection), but a carried block may have been written by an older run at a
+    different depth — e.g. level 2 under the retired `* High/Medium/Low Priority` bucket
+    headings, or level 3 under the even older FYI `** Pull Requests` grouping. We compute the
+    block's current top heading depth and apply the same delta to all headings in the block,
+    clamping at 1 so headings never lose all their stars.
     """
     headings = _BLOCK_HEADING_RE.findall(block)
     if not headings:
@@ -503,6 +515,24 @@ def _ensure_notes_line(block: str) -> str:
     return _DRAWER_END_RE.sub(_insert, block, count=1)
 
 
+def _ensure_priority_tag(block: str, priority: str) -> str:
+    """Append a priority org tag to a carried block's top heading if it lacks one.
+
+    Carried-over item blocks are reused verbatim (not re-rendered through
+    ``render_item_subtree``), so a block written before priority tags existed — or under the
+    retired ``* High/Medium/Low Priority`` bucket layout — has no tag on its heading. This
+    appends ``:<priority>:`` to the first heading line, but only when no priority tag
+    (``:high:``/``:medium:``/``:low:``) is already present, so it is idempotent and never
+    disturbs a heading that already carries one (or any other user-added org tags).
+    """
+    m = _FIRST_HEADING_RE.search(block)
+    if not m or _PRIORITY_TAG_RE.search(m.group(0)):
+        return block
+    stars, title = m.group(1), m.group(2)
+    tagged = f"{stars} {title} :{priority}:"
+    return block[: m.start()] + tagged + block[m.end() :]
+
+
 def render_activity_delta(
     prev_block: str,
     item: dict[str, Any],
@@ -531,28 +561,24 @@ def render_activity_delta(
 
 
 def render_inbox_org(
-    buckets: dict[str, list[str]],
+    items: list[str],
     timestamp: str,
 ) -> str:
     """Assemble the full Org-mode inbox document (Step 6).
 
-    ``buckets`` maps "high"/"medium"/"low" to lists of pre-rendered item subtree
-    strings. Each is a flat list under its ``*`` priority heading; empty buckets get
-    the italic placeholder.
+    ``items`` is the ordered list of pre-rendered item subtree strings — a single flat
+    list, most-important-first (priority, then recency). There are no priority subsection
+    headings: each item is a top-level ``*`` heading carrying its priority as an org tag
+    (``:high:``/``:medium:``/``:low:``), so position implies importance while the tag keeps
+    the priority visible and searchable. An empty inbox gets the italic placeholder.
     """
     out = [f"#+TITLE: {ORG_TITLE}", f"#+DATE: {timestamp}", ""]
 
-    for key, heading in (
-        ("high", "* High Priority"),
-        ("medium", "* Medium Priority"),
-        ("low", "* Low Priority"),
-    ):
-        out.append(heading)
-        if buckets.get(key):
-            out.extend(buckets[key])
-        else:
-            out.append(EMPTY_BUCKET_PLACEHOLDER)
-            out.append("")
+    if items:
+        out.extend(items)
+    else:
+        out.append(EMPTY_BUCKET_PLACEHOLDER)
+        out.append("")
 
     return "\n".join(out).rstrip() + "\n"
 
@@ -764,61 +790,67 @@ def run_pipeline(user_request: str = "") -> RunSummary:
     carried_urls = [url for url in existing if url not in touched_urls]
     carried_over_count = len(carried_urls)
 
-    buckets: dict[str, list[str]] = {
-        "high": [],
-        "medium": [],
-        "low": [],
-    }
     high_priority_titles: list[str] = []
 
-    def _place(item: dict[str, Any], block: str) -> None:
-        """Route a rendered block into its priority bucket; record High Priority titles."""
-        bucket = item.get("bucket", "low")
-        if bucket == "high":
-            buckets["high"].append(block)
-            high_priority_titles.append(str(item.get("title", "")))
-        elif bucket == "medium":
-            buckets["medium"].append(block)
-        else:  # low — flat list
-            buckets["low"].append(block)
+    # Priority sort rank: high floats to the top, then medium, then low. The inbox is one
+    # flat list ordered most-important-first, so position implies importance (the priority
+    # is also carried as an org tag on each heading).
+    _PRIORITY_RANK = {"high": 0, "medium": 1, "low": 2}
 
-    # Item heading depth: every item is a level-2 heading directly under its `*` bucket.
+    # Every item is now a top-level `*` heading (no priority subsection to nest under); its
+    # priority lives in the heading's org tag instead.
     def _item_level(item: dict[str, Any]) -> int:
-        return 2
+        return 1
 
-    # Full-render and delta items together, sorted by latest activity (most recent first).
+    # Build one flat list of (rank, recency, block) across full-render, delta, and
+    # carried-over items, then sort by (rank asc, recency desc) so all high items lead,
+    # then medium, then low; within a tier the most recently active item is first.
     timestamp = current_timestamp()
-    merged: list[tuple[dict[str, Any], str]] = [
-        (item, render_item_subtree(item, render, level=_item_level(item)))
-        for item, render in rendered.values()
-    ]
-    for url, (item, delta) in delta_rendered.items():
-        # The delta is appended inline under the item heading (no child heading).
-        merged.append(
-            (
-                item,
-                render_activity_delta(
-                    existing[url]["block"], item, delta, timestamp, level=_item_level(item)
-                ),
-            )
+    entries: list[tuple[int, str, str]] = []
+
+    def _add(item: dict[str, Any], block: str) -> None:
+        bucket = str(item.get("bucket", "low"))
+        if bucket == "high":
+            high_priority_titles.append(str(item.get("title", "")))
+        entries.append(
+            (_PRIORITY_RANK.get(bucket, 2), str(item.get("updated_at", "")), block)
         )
 
-    for item, block in sorted(
-        merged, key=lambda pair: str(pair[0].get("updated_at", "")), reverse=True
-    ):
-        _place(item, block)
+    for item, render in rendered.values():
+        _add(item, render_item_subtree(item, render, level=_item_level(item)))
+    for url, (item, delta) in delta_rendered.items():
+        # The delta is appended inline under the item heading (no child heading).
+        _add(
+            item,
+            render_activity_delta(
+                existing[url]["block"], item, delta, timestamp, level=_item_level(item)
+            ),
+        )
 
     # Carried-over items keep their original subtree text verbatim (including any :NOTES:
-    # the user typed). Per Step 5 untouched items are not re-classified, so we place them
-    # under Low Priority by default rather than re-bucketing from the stored drawer. We heal
-    # any stale ``*** Update`` heading a pre-fix run left behind so it can never resurface as
-    # a subheading, and back-fill an empty :NOTES: line for blocks that predate it.
+    # the user typed). Per Step 5 untouched items are not re-classified, so they default to
+    # low priority (they sink to the bottom of the list) rather than being re-bucketed. We
+    # heal any stale ``*** Update`` heading a pre-fix run left behind so it can never
+    # resurface as a subheading, re-level it to a top-level `*` heading, back-fill an empty
+    # :NOTES: line for blocks that predate it, and back-fill a :low: priority tag for blocks
+    # written before tags existed (idempotent — a block that already has a tag is untouched).
     for url in carried_urls:
-        healed = _normalize_stale_update_headings(existing[url]["block"], level=_item_level({}))
-        buckets["low"].append(_ensure_notes_line(healed))
+        healed = _normalize_stale_update_headings(
+            existing[url]["block"], level=_item_level({})
+        )
+        healed = _relevel_block(healed.rstrip("\n"), target_top_level=_item_level({}))
+        healed = _ensure_notes_line(_ensure_priority_tag(healed, "low"))
+        entries.append((_PRIORITY_RANK["low"], str(existing[url].get("last_seen") or ""), healed))
+
+    # Sort in two stable passes (clearer than inverting both keys at once): first by recency
+    # descending, then by priority rank ascending. Python's sort is stable, so within a
+    # priority tier the recency ordering from the first pass is preserved.
+    entries.sort(key=lambda e: e[1], reverse=True)  # recency: newest first
+    entries.sort(key=lambda e: e[0])                # priority: high(0) -> medium -> low
+    ordered = [block for _, _, block in entries]
 
     # Step 6: write the doc (BEFORE marking Done — the irreversible commit point).
-    doc = render_inbox_org(buckets, current_timestamp())
+    doc = render_inbox_org(ordered, current_timestamp())
     inbox_path.parent.mkdir(parents=True, exist_ok=True)
     inbox_path.write_text(doc, encoding="utf-8")
 
