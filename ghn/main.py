@@ -11,6 +11,8 @@ from __future__ import annotations
 import argparse
 import sys
 
+from . import config
+from .llama_server import LlamaServerError, spawned_llama_server
 from .pipeline import run_pipeline
 
 
@@ -35,7 +37,18 @@ def main() -> int:
 
     user_request = " ".join(args.request).strip()
 
-    summary = run_pipeline(user_request=user_request)
+    # When GHN_LLAMA_SPAWN is on, stand up a local llama-server for the duration of this
+    # run and point the pipeline at its OpenAI-compatible endpoint; the context manager
+    # tears the process down on exit (including on error), so a run never orphans a server.
+    if config.LLAMA_SPAWN:
+        try:
+            with spawned_llama_server() as base_url:
+                summary = run_pipeline(user_request=user_request, base_url=base_url)
+        except LlamaServerError as exc:
+            print(f"ghn: {exc}", file=sys.stderr)
+            return 1
+    else:
+        summary = run_pipeline(user_request=user_request)
 
     print(summary.headline)
     print(

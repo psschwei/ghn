@@ -155,3 +155,48 @@ ITEM_SUMMARY_MAX_TOKENS: Final[int] = int(
 RUN_SUMMARY_MAX_TOKENS: Final[int] = int(
     _cfg('GHN_RUN_SUMMARY_MAX_TOKENS', 'model', 'run_summary_max_tokens', 512)
 )
+
+# === Self-hosted llama.cpp (spawn-per-run) ===
+# Optionally have ghn stand up its own `llama-server` instance for the duration of a run,
+# then tear it down. The server exposes an OpenAI-compatible /v1 endpoint, so when spawn is
+# on, main.py runs the pipeline with backend='openai' pointed at the local server (see
+# run_pipeline's base_url override). One model serves both the summary and classifier roles;
+# set GHN_MODEL_ID and GHN_CLASSIFIER_MODEL_ID to the same served name.
+# Trade-off: the model's weights load cold on every run — there is no resident daemon like
+# Ollama. Fine for occasional/manual runs; revisit a persistent server for tight loops.
+# env GHN_LLAMA_* > [llama] key > default.
+
+
+def _cfg_bool(env: str, section: str, key: str, default: bool) -> bool:
+    """Resolve a boolean setting. Accepts TOML booleans and truthy strings ('1', 'true',
+    'yes', 'on', case-insensitive); everything else is False."""
+    val = _cfg(env, section, key, default)
+    if isinstance(val, bool):
+        return val
+    return str(val).strip().lower() in ('1', 'true', 'yes', 'on')
+
+
+# Master switch: when true, main.py spawns llama-server around the pipeline run.
+LLAMA_SPAWN: Final[bool] = _cfg_bool('GHN_LLAMA_SPAWN', 'llama', 'spawn', False)
+
+# The llama-server executable (on PATH or an absolute path).
+LLAMA_BINARY: Final[str] = _cfg('GHN_LLAMA_BINARY', 'llama', 'binary', 'llama-server')
+
+# The model to serve: a local .gguf path OR a Hugging Face repo spec (passed as `-hf`, e.g.
+# 'lmstudio-community/Qwen3.6-35B-A3B-GGUF'). Required when LLAMA_SPAWN is on; main.py errors
+# clearly if it's empty. A value containing '/' with no '.gguf' suffix is treated as an -hf
+# spec, otherwise as a local model-file path.
+LLAMA_MODEL: Final[str | None] = _cfg('GHN_LLAMA_MODEL', 'llama', 'model', None) or None
+
+# Port llama-server listens on (localhost only). base_url becomes http://127.0.0.1:{port}/v1.
+LLAMA_PORT: Final[int] = int(_cfg('GHN_LLAMA_PORT', 'llama', 'port', 8080))
+
+# Seconds to wait for /health to pass before giving up. A large MoE loads cold slowly, so
+# the default is generous.
+LLAMA_HEALTH_TIMEOUT: Final[int] = int(
+    _cfg('GHN_LLAMA_HEALTH_TIMEOUT', 'llama', 'health_timeout', 300)
+)
+
+# Free-form extra flags appended to the llama-server command, split with shlex (e.g.
+# '-ngl 99 -c 8192 --jinja'). Empty by default.
+LLAMA_ARGS: Final[str] = _cfg('GHN_LLAMA_ARGS', 'llama', 'args', '')

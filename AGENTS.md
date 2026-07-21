@@ -38,6 +38,19 @@ config. Verify changes by running the pipeline.
   To use a hosted or OpenAI-compatible endpoint instead of local Ollama, set `GHN_BACKEND=openai`
   (or `litellm`) plus `GHN_BASE_URL` (endpoint) and `GHN_API_KEY`. `GHN_BASE_URL` also works for
   Ollama (e.g. a remote GPU box); `GHN_API_KEY` is ignored by the Ollama backend.
+- **Self-hosted `llama.cpp` (spawn-per-run)**: set `GHN_LLAMA_SPAWN=1` to have `main.py` stand
+  up its own `llama-server` for the duration of a run (`llama_server.py`), then tear it down —
+  even on error. `llama-server` serves an OpenAI-compatible `/v1` endpoint, so the run is
+  executed with backend `openai` pointed at `http://127.0.0.1:{port}/v1` via `run_pipeline`'s
+  `base_url` override (the module-level `BACKEND`/`BACKEND_KWARGS` are left untouched). One
+  model serves both roles: set `GHN_MODEL_ID` and `GHN_CLASSIFIER_MODEL_ID` to the same served
+  name. Requires the `llama-server` binary on PATH and a model via `GHN_LLAMA_MODEL` (a local
+  `.gguf` path, or a Hugging Face repo spec like `lmstudio-community/Qwen3.6-35B-A3B-GGUF`,
+  passed as `-hf`). Knobs: `GHN_LLAMA_BINARY`, `GHN_LLAMA_PORT` (default 8080),
+  `GHN_LLAMA_HEALTH_TIMEOUT` (default 300s — a large MoE loads cold slowly),
+  `GHN_LLAMA_ARGS` (extra flags, shlex-split, e.g. `-ngl 99 -c 8192`). Trade-off: the model's
+  weights load cold on **every** run (no resident daemon like Ollama) — fine for occasional/
+  manual runs; for tight loops prefer a persistent server pointed at with `GHN_BASE_URL`.
 
 ## Architecture
 
@@ -62,8 +75,12 @@ conventions:
   `{html_url: {block, last_seen}}` map and projects raw `gh` notification JSON.
 - **`config.py`** — scalar constants only (env-overridable: `GITHUB_INBOX_PATH`,
   `GITHUB_ENTERPRISE_HOST`, `GHN_*_MAX_TOKENS`, `GHN_BACKEND`, `GHN_BASE_URL`, `GHN_API_KEY`,
-  `GHN_MODEL_ID`, `GHN_CLASSIFIER_MODEL_ID`). Lookup *tables* live in `pipeline.py`, not here.
-  `BACKEND_KWARGS` (a dict) is the one exception to scalar-only, built from the endpoint envs.
+  `GHN_MODEL_ID`, `GHN_CLASSIFIER_MODEL_ID`, and the `GHN_LLAMA_*` spawn knobs). Lookup
+  *tables* live in `pipeline.py`, not here. `BACKEND_KWARGS` (a dict) is the one exception to
+  scalar-only, built from the endpoint envs.
+- **`llama_server.py`** — the `spawned_llama_server()` context manager (start `llama-server`,
+  poll `/health`, yield the base URL, terminate on exit). Only used when `GHN_LLAMA_SPAWN` is
+  on; wired in `main.py`, not the pipeline.
 
 ### Key invariants
 
