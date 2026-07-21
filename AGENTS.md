@@ -45,7 +45,7 @@ config. Verify changes by running the pipeline.
   `base_url` override (the module-level `BACKEND`/`BACKEND_KWARGS` are left untouched). One
   model serves both roles: set `GHN_MODEL_ID` and `GHN_CLASSIFIER_MODEL_ID` to the same served
   name. Requires the `llama-server` binary on PATH and a model via `GHN_LLAMA_MODEL` (a local
-  `.gguf` path, or a Hugging Face repo spec like `lmstudio-community/Qwen3.6-35B-A3B-GGUF`,
+  `.gguf` path, or a Hugging Face repo spec like `ibm-granite/granite-4.1-8b-GGUF`,
   passed as `-hf`). Knobs: `GHN_LLAMA_BINARY`, `GHN_LLAMA_PORT` (default 8080),
   `GHN_LLAMA_HEALTH_TIMEOUT` (default 300s — a large MoE loads cold slowly),
   `GHN_LLAMA_ARGS` (extra flags, shlex-split, e.g. `-ngl 99 -c 8192`). Trade-off: the model's

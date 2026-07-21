@@ -183,7 +183,7 @@ LLAMA_SPAWN: Final[bool] = _cfg_bool('GHN_LLAMA_SPAWN', 'llama', 'spawn', False)
 LLAMA_BINARY: Final[str] = _cfg('GHN_LLAMA_BINARY', 'llama', 'binary', 'llama-server')
 
 # The model to serve: a local .gguf path OR a Hugging Face repo spec (passed as `-hf`, e.g.
-# 'lmstudio-community/Qwen3.6-35B-A3B-GGUF'). Required when LLAMA_SPAWN is on; main.py errors
+# 'ibm-granite/granite-4.1-8b-GGUF'). Required when LLAMA_SPAWN is on; main.py errors
 # clearly if it's empty. A value containing '/' with no '.gguf' suffix is treated as an -hf
 # spec, otherwise as a local model-file path.
 LLAMA_MODEL: Final[str | None] = _cfg('GHN_LLAMA_MODEL', 'llama', 'model', None) or None

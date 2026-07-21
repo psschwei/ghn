@@ -47,7 +47,9 @@ ghn
 By default `ghn` runs against a local [Ollama](https://ollama.com/) install, but the
 backend, models, and endpoint are all configurable (`GHN_BACKEND`, `GHN_MODEL_ID`,
 `GHN_BASE_URL`, `GHN_API_KEY`) — so you can point it at OpenAI, a LiteLLM proxy, or any
-OpenAI-compatible gateway instead. Set these via environment variables, or persistently
+OpenAI-compatible gateway instead. It can also spawn its own self-hosted
+[`llama.cpp`](https://github.com/ggml-org/llama.cpp) `llama-server` for the duration of a
+run (`GHN_LLAMA_SPAWN=1`). Set these via environment variables, or persistently
 in `~/.config/ghn/config.toml` (works regardless of which directory you launch `ghn`
 from).
 

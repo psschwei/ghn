@@ -69,6 +69,56 @@ export GHN_CLASSIFIER_MODEL_ID=claude-haiku-4-5-20251001
 (For Anthropic's native API rather than an OpenAI-compatible proxy, use
 `GHN_BACKEND=litellm` with a `claude-*` model id.)
 
+### Self-hosted `llama.cpp` (spawn-per-run)
+
+Instead of a resident daemon (Ollama) or a hosted endpoint, `ghn` can stand up its own
+[`llama.cpp`](https://github.com/ggml-org/llama.cpp) `llama-server` for the duration of a
+single run and tear it down afterward — even if the run errors. `llama-server` exposes an
+OpenAI-compatible `/v1` endpoint, so when spawn is on `ghn` runs the pipeline with the
+`openai` backend pointed at `http://127.0.0.1:{port}/v1`. One model serves **both** the
+summary and classifier roles.
+
+The lifecycle: launch the binary → poll `/health` until it reports ready → hand the
+pipeline the local base URL → SIGTERM (then SIGKILL) on exit. If the process dies during
+model load or `/health` doesn't pass within the timeout, the run fails with a clear error
+and no server is left running.
+
+Turn it on with `GHN_LLAMA_SPAWN=1` and point it at a model:
+
+```bash
+export GHN_LLAMA_SPAWN=1
+# A local .gguf file:
+export GHN_LLAMA_MODEL=/models/granite-4.1-8b-Q4_K_M.gguf
+# ...or a Hugging Face repo spec (downloaded/cached by llama.cpp, passed as -hf):
+export GHN_LLAMA_MODEL=ibm-granite/granite-4.1-8b-GGUF
+
+# One served model fills both roles — set both ids to the served name:
+export GHN_MODEL_ID=granite-4.1-8b
+export GHN_CLASSIFIER_MODEL_ID=granite-4.1-8b
+```
+
+`GHN_LLAMA_MODEL` is treated as a Hugging Face repo spec (`-hf`) when it contains `/` and
+does **not** end in `.gguf`; otherwise it's a local model-file path (`-m`).
+
+#### Knobs
+
+| Env var | Default | Purpose |
+| --- | --- | --- |
+| `GHN_LLAMA_SPAWN` | `false` | Master switch. When true, spawn `llama-server` around the run. |
+| `GHN_LLAMA_MODEL` | *(unset)* | **Required when spawn is on.** Local `.gguf` path or an `owner/repo` HF spec. |
+| `GHN_LLAMA_BINARY` | `llama-server` | The `llama-server` executable (on `PATH` or an absolute path). |
+| `GHN_LLAMA_PORT` | `8080` | Port to listen on (localhost only); base URL becomes `http://127.0.0.1:{port}/v1`. |
+| `GHN_LLAMA_HEALTH_TIMEOUT` | `300` | Seconds to wait for `/health`. A large MoE loads cold slowly, so the default is generous. |
+| `GHN_LLAMA_ARGS` | *(empty)* | Free-form extra flags, appended verbatim (shlex-split), e.g. `-ngl 99 -c 8192 --jinja`. |
+
+Requires the `llama-server` binary on `PATH` (or set `GHN_LLAMA_BINARY`) — see the
+[llama.cpp build docs](https://github.com/ggml-org/llama.cpp/blob/master/docs/build.md).
+
+> **Trade-off**: the model's weights load cold on **every** run — there is no resident
+> daemon like Ollama. That's fine for occasional or manual runs; for tight loops, prefer
+> running a persistent `llama-server` yourself and pointing `ghn` at it with
+> `GHN_BACKEND=openai` + `GHN_BASE_URL` instead.
+
 The inbox doc is written to `~/org/github.org` by default. Set the `GITHUB_INBOX_PATH`
 environment variable to write it elsewhere (a leading `~` is expanded). Its parent
 directory is created automatically on the first write.
@@ -142,6 +192,14 @@ model_id                = "granite4.1:8b"  # GHN_MODEL_ID
 classifier_model_id     = "granite4.1:3b"  # GHN_CLASSIFIER_MODEL_ID
 item_summary_max_tokens = 1024             # GHN_ITEM_SUMMARY_MAX_TOKENS
 run_summary_max_tokens  = 512              # GHN_RUN_SUMMARY_MAX_TOKENS
+
+[llama]                                    # self-hosted llama.cpp (spawn-per-run)
+spawn          = false                     # GHN_LLAMA_SPAWN
+model          = ""                        # GHN_LLAMA_MODEL (.gguf path or owner/repo HF spec)
+binary         = "llama-server"            # GHN_LLAMA_BINARY
+port           = 8080                      # GHN_LLAMA_PORT
+health_timeout = 300                       # GHN_LLAMA_HEALTH_TIMEOUT (seconds)
+args           = ""                        # GHN_LLAMA_ARGS (extra flags, shlex-split)
 ```
 
 Every key is optional — omit a section or key to keep its default. The file is parsed

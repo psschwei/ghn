@@ -87,7 +87,7 @@ def spawned_llama_server(
     if not model or not str(model).strip():
         raise LlamaServerError(
             'No model configured for llama-server. Set GHN_LLAMA_MODEL (a local .gguf path '
-            "or a Hugging Face repo spec like 'lmstudio-community/Qwen3.6-35B-A3B-GGUF')."
+            "or a Hugging Face repo spec like 'ibm-granite/granite-4.1-8b-GGUF')."
         )
 
     argv = _build_argv(
