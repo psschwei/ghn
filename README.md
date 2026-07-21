@@ -45,9 +45,11 @@ ghn
 ```
 
 By default `ghn` runs against a local [Ollama](https://ollama.com/) install, but the
-backend, models, and endpoint are all env-configurable (`GHN_BACKEND`, `GHN_MODEL_ID`,
+backend, models, and endpoint are all configurable (`GHN_BACKEND`, `GHN_MODEL_ID`,
 `GHN_BASE_URL`, `GHN_API_KEY`) — so you can point it at OpenAI, a LiteLLM proxy, or any
-OpenAI-compatible gateway instead.
+OpenAI-compatible gateway instead. Set these via environment variables, or persistently
+in `~/.config/ghn/config.toml` (works regardless of which directory you launch `ghn`
+from).
 
 See [`docs/mellea-setup.md`](docs/mellea-setup.md) for full setup (model backend, hosts)
 and [`docs/mellea-guide.md`](docs/mellea-guide.md) for the complete guide.

@@ -50,6 +50,9 @@ env-overridable, so you don't need to edit the source.
 The model-id strings are passed through verbatim — there's no tag-format validation — so
 when you point at a non-Ollama endpoint, set the model ids to names that endpoint serves.
 
+Every knob above can also be set persistently in `~/.config/ghn/config.toml` instead of
+the environment — see [§3c](#3c-config-file-configtoml) below.
+
 ### Hosted / OpenAI-compatible endpoint
 
 To talk to OpenAI, a LiteLLM proxy, vLLM, or any OpenAI-compatible gateway, use the
@@ -114,6 +117,35 @@ configure its host — no repo edit required, so it survives `uv tool install`:
 
 The host is resolved once at startup (env var first, then the config file). Leave both
 unset for a github.com-only setup.
+
+### §3c Config file (`config.toml`)
+
+Every knob is resolvable three ways, in order: **environment variable → `config.toml`
+→ built-in default**. So env vars still win for one-off overrides, while `config.toml`
+gives you a persistent, location-independent setup (unlike a cwd-based `.env`, it's read
+from `~/.config/ghn/config.toml` no matter which directory you launch `ghn` from).
+
+A full `~/.config/ghn/config.toml`:
+
+```toml
+[github]
+enterprise_host = "your.enterprise.host"   # GITHUB_ENTERPRISE_HOST
+inbox_path      = "~/org/github.org"       # GITHUB_INBOX_PATH (leading ~ expanded)
+
+[backend]
+backend  = "openai"                        # GHN_BACKEND
+base_url = "http://localhost:1234/v1"      # GHN_BASE_URL (e.g. an LM Studio server)
+api_key  = "lm-studio"                     # GHN_API_KEY (openai / litellm only)
+
+[model]
+model_id                = "granite4.1:8b"  # GHN_MODEL_ID
+classifier_model_id     = "granite4.1:3b"  # GHN_CLASSIFIER_MODEL_ID
+item_summary_max_tokens = 1024             # GHN_ITEM_SUMMARY_MAX_TOKENS
+run_summary_max_tokens  = 512              # GHN_RUN_SUMMARY_MAX_TOKENS
+```
+
+Every key is optional — omit a section or key to keep its default. The file is parsed
+once at startup; a missing or malformed file is ignored (defaults apply).
 
 > **Safety note**: `tools.py` enforces a method allowlist of `GET` and `DELETE` only. The
 > bulk mark-all-read call (`PUT /notifications -f read=true`) — which would strand

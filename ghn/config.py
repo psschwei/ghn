@@ -22,43 +22,70 @@ ORG_TITLE: Final[str] = 'GitHub Inbox'
 EMPTY_BUCKET_PLACEHOLDER: Final[str] = '/Nothing right now./'
 # PROVENANCE: SKILL.md:315-317
 
+# === Config file loader ===
+# Every runtime knob can be set three ways; resolution order (first wins):
+#   1. The environment variable (e.g. GHN_MODEL_ID)
+#   2. ~/.config/ghn/config.toml -> [section] key
+#   3. The hardcoded default below
+# The TOML file is uncommitted user config living outside the working tree, so it works
+# the same whether run from the repo or after `uv tool install` (location-independent,
+# unlike a cwd-based dotenv). Sections: [github] (enterprise_host, inbox_path),
+# [backend] (backend, base_url, api_key), [model] (model_id, classifier_model_id,
+# item_summary_max_tokens, run_summary_max_tokens).
+_CONFIG_PATH: Final[str] = os.path.expanduser('~/.config/ghn/config.toml')
+
+
+def _load_toml() -> dict:
+    try:
+        with open(_CONFIG_PATH, 'rb') as fh:
+            return tomllib.load(fh)
+    except (OSError, tomllib.TOMLDecodeError):
+        return {}
+
+
+# Parsed once at import; empty dict if the file is missing or malformed.
+_TOML: Final[dict] = _load_toml()
+
+
+def _cfg(env: str, section: str, key: str, default):
+    """Resolve a setting: env var > config.toml [section].key > default.
+
+    Empty / whitespace-only values (env or TOML) are treated as unset so they fall
+    through to the next source rather than blanking a real default.
+    """
+    raw = os.environ.get(env)
+    if raw is not None and raw.strip() != '':
+        return raw
+    sect = _TOML.get(section)
+    if isinstance(sect, dict):
+        val = sect.get(key)
+        if val is not None and not (isinstance(val, str) and val.strip() == ''):
+            return val
+    return default
+
+
 # === C3: User Facts ===
-# Inbox doc location. Override with GITHUB_INBOX_PATH; defaults to ~/org/github.org.
+# Inbox doc location. env GITHUB_INBOX_PATH > [github] inbox_path > ~/org/github.org.
 # Leading ~ is expanded so the default resolves to the user's home directory.
 INBOX_PATH: Final[str] = os.path.expanduser(
-    os.environ.get('GITHUB_INBOX_PATH', '~/org/github.org')
+    _cfg('GITHUB_INBOX_PATH', 'github', 'inbox_path', '~/org/github.org')
 )
 # PROVENANCE: SKILL.md:18-30
 
 GITHUB_COM_HOST: Final[str] = 'github.com'
 # PROVENANCE: SKILL.md:45-53
 
+
 # Optional GitHub Enterprise host to check alongside github.com.
-# Resolution order (first non-empty wins; default is None == github.com only):
-#   1. GITHUB_ENTERPRISE_HOST environment variable
-#   2. ~/.config/ghn/config.toml -> [github] enterprise_host
-#      (or a top-level enterprise_host key)
-# The TOML file is uncommitted user config, so it works the same whether run from
-# the repo or after `uv tool install` (it lives outside the install/working tree).
-_CONFIG_PATH: Final[str] = os.path.expanduser(
-    '~/.config/ghn/config.toml'
-)
-
-
+# env GITHUB_ENTERPRISE_HOST > [github] enterprise_host > top-level enterprise_host
+# (legacy, kept for back-compat) > None (github.com only).
 def _load_enterprise_host() -> str | None:
-    env = os.environ.get('GITHUB_ENTERPRISE_HOST', '').strip()
-    if env:
-        return env
-    try:
-        with open(_CONFIG_PATH, 'rb') as fh:
-            data = tomllib.load(fh)
-    except (OSError, tomllib.TOMLDecodeError):
-        return None
-    github = data.get('github')
-    host = (github or {}).get('enterprise_host') if isinstance(github, dict) else None
+    host = _cfg('GITHUB_ENTERPRISE_HOST', 'github', 'enterprise_host', None)
     if not host:
-        host = data.get('enterprise_host')
-    host = (host or '').strip() if isinstance(host, str) else None
+        # Legacy: top-level enterprise_host key (pre-[github]-section configs).
+        legacy = _TOML.get('enterprise_host')
+        host = legacy if isinstance(legacy, str) else None
+    host = host.strip() if isinstance(host, str) else None
     return host or None
 
 
@@ -75,19 +102,19 @@ GITHUB_HOSTS: Final[tuple[str, ...]] = (
 
 # === C8: Runtime Environment ===
 # Mellea backend to drive the models. Defaults to local Ollama; override with GHN_BACKEND
-# to point at any backend mellea supports ('ollama', 'hf', 'openai', 'watsonx', 'litellm').
-# Use 'openai' with GHN_BASE_URL to talk to OpenAI itself or any OpenAI-compatible server
-# (vLLM, LiteLLM proxy, a hosted gateway, etc.).
-BACKEND: Final[str] = os.environ.get('GHN_BACKEND', 'ollama')
+# (or [backend] backend) to point at any backend mellea supports ('ollama', 'hf',
+# 'openai', 'watsonx', 'litellm'). Use 'openai' with GHN_BASE_URL to talk to OpenAI
+# itself or any OpenAI-compatible server (vLLM, LiteLLM proxy, a hosted gateway, etc.).
+BACKEND: Final[str] = _cfg('GHN_BACKEND', 'backend', 'backend', 'ollama')
 
 # Optional endpoint + credentials, threaded into every start_session() as backend kwargs.
-# GHN_BASE_URL works for both the Ollama and OpenAI-compatible backends (both accept
-# base_url); leave it unset to use the backend's own default (Ollama -> localhost:11434,
-# OpenAI -> the public API). GHN_API_KEY is only meaningful for the OpenAI/LiteLLM backends,
-# so it's only forwarded for those — Ollama's constructor rejects an unexpected kwarg.
-# The OpenAI backend also falls back to the standard OPENAI_API_KEY env var when unset.
-_BASE_URL: Final[str | None] = os.environ.get('GHN_BASE_URL') or None
-_API_KEY: Final[str | None] = os.environ.get('GHN_API_KEY') or None
+# base_url works for both the Ollama and OpenAI-compatible backends (both accept it);
+# leave it unset to use the backend's own default (Ollama -> localhost:11434, OpenAI ->
+# the public API). api_key is only meaningful for the OpenAI/LiteLLM backends, so it's
+# only forwarded for those — Ollama's constructor rejects an unexpected kwarg. The OpenAI
+# backend also falls back to the standard OPENAI_API_KEY env var when unset.
+_BASE_URL: Final[str | None] = _cfg('GHN_BASE_URL', 'backend', 'base_url', None) or None
+_API_KEY: Final[str | None] = _cfg('GHN_API_KEY', 'backend', 'api_key', None) or None
 
 
 def _build_backend_kwargs() -> dict[str, str]:
@@ -106,21 +133,25 @@ BACKEND_KWARGS: Final[dict[str, str]] = _build_backend_kwargs()
 # Granite size drives summary quality: the 3B model hallucinates details and drops
 # key context under the dense, multi-clause summary prompts. 8B is the default; bump to
 # granite4.1:30b for the best quality, or set GHN_MODEL_ID back to granite4.1:3b to compare.
-MODEL_ID: Final[str] = os.environ.get('GHN_MODEL_ID', 'granite4.1:8b')
+MODEL_ID: Final[str] = _cfg('GHN_MODEL_ID', 'model', 'model_id', 'granite4.1:8b')
 
 # Classification (filter mode, priority bucket) is a small fixed-label pick, not prose —
 # 3B handles it fine, so we keep it on the cheaper/faster model rather than paying 8B
 # latency. Override with GHN_CLASSIFIER_MODEL_ID (e.g. to match MODEL_ID for comparison).
-CLASSIFIER_MODEL_ID: Final[str] = os.environ.get('GHN_CLASSIFIER_MODEL_ID', 'granite4.1:3b')
+CLASSIFIER_MODEL_ID: Final[str] = _cfg(
+    'GHN_CLASSIFIER_MODEL_ID', 'model', 'classifier_model_id', 'granite4.1:3b'
+)
 
 LOOP_BUDGET: Final[int] = 3
 
 # Generation budgets (Ollama num_predict). Without these the backend falls back to
 # its small default, which truncates summaries to a bare-bones sentence or two.
-# Override per-deployment with GHN_ITEM_SUMMARY_MAX_TOKENS / GHN_RUN_SUMMARY_MAX_TOKENS.
+# Override with GHN_ITEM_SUMMARY_MAX_TOKENS / GHN_RUN_SUMMARY_MAX_TOKENS or the
+# [model] item_summary_max_tokens / run_summary_max_tokens keys. int() accepts both a
+# TOML integer and a string env value.
 ITEM_SUMMARY_MAX_TOKENS: Final[int] = int(
-    os.environ.get('GHN_ITEM_SUMMARY_MAX_TOKENS', '1024')
+    _cfg('GHN_ITEM_SUMMARY_MAX_TOKENS', 'model', 'item_summary_max_tokens', 1024)
 )
 RUN_SUMMARY_MAX_TOKENS: Final[int] = int(
-    os.environ.get('GHN_RUN_SUMMARY_MAX_TOKENS', '512')
+    _cfg('GHN_RUN_SUMMARY_MAX_TOKENS', 'model', 'run_summary_max_tokens', 512)
 )
