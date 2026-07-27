@@ -328,8 +328,9 @@ def render_item_subtree(item: dict[str, Any], render: ItemRender, level: int) ->
     always-present :NOTES: line, empty by default, that the user can type a note into;
     user-owned free text re-emitted verbatim so a typed note survives this full re-render),
     the raw html_url on its own line (for C-c C-o / link-open access), a metadata table
-    (Reviewers row omitted for Issues), the generated summary, the "Why you're seeing this"
-    line, and the "Latest activity" line.
+    (Assignees shown for both; the Reviewers/Approved/Reviewed/Merge-queue rows are
+    PR-only), the generated summary, the "Why you're seeing this" line, and the "Latest
+    activity" line.
     """
     stars = "*" * level
     indent = " " * (level + 1)
@@ -363,9 +364,11 @@ def render_item_subtree(item: dict[str, Any], render: ItemRender, level: int) ->
     # For PRs, collapse draft/merged into the State word (raw .state is just
     # "open"/"closed" and would show a draft PR as "open"); Issues keep raw .state.
     state_value = _pr_state_summary(enriched) if is_pr else str(enriched.get("state", "unknown"))
+    assignees = enriched.get("assignees") or []
     rows = [
         ("State", state_value),
         ("Author", str(enriched.get("user", "unknown"))),
+        ("Assignees", ", ".join(assignees) if assignees else "—"),
     ]
     if is_pr:
         reviewers = enriched.get("requested_reviewers") or []
