@@ -33,10 +33,11 @@ config. Verify changes by running the pipeline.
 
 - **`gh` CLI**, authenticated (`gh auth login`). All GitHub access goes through it; no
   token is embedded. An unauthenticated host is silently skipped.
-- **Ollama** running with the model pulled: `ollama pull granite4.1:3b`. Backend/model are
-  set in `ghn/config.py` (`BACKEND` / `MODEL_ID` / `CLASSIFIER_MODEL_ID`), all env-overridable.
-  To use a hosted or OpenAI-compatible endpoint instead of local Ollama, set `GHN_BACKEND=openai`
-  (or `litellm`) plus `GHN_BASE_URL` (endpoint) and `GHN_API_KEY`. `GHN_BASE_URL` also works for
+- **Ollama** running with the model pulled (default `granite4.1:8b` for summaries,
+  `granite4.1:3b` for classification). Backend/models are set in `ghn/config.py`
+  (`BACKEND` / `MODEL_ID` / `CLASSIFIER_MODEL_ID`), all env-overridable. To use a hosted or
+  OpenAI-compatible endpoint instead of local Ollama, set `GHN_BACKEND=openai` (or
+  `litellm`) plus `GHN_BASE_URL` (endpoint) and `GHN_API_KEY`. `GHN_BASE_URL` also works for
   Ollama (e.g. a remote GPU box); `GHN_API_KEY` is ignored by the Ollama backend.
 - **Self-hosted `llama.cpp` (spawn-per-run)**: set `GHN_LLAMA_SPAWN=1` to have `main.py` stand
   up its own `llama-server` for the duration of a run (`llama_server.py`), then tear it down —
@@ -52,6 +53,17 @@ config. Verify changes by running the pipeline.
   weights load cold on **every** run (no resident daemon like Ollama) — fine for occasional/
   manual runs; for tight loops prefer a persistent server pointed at with `GHN_BASE_URL`.
 
+## Configuration
+
+Every runtime knob resolves in this order (first wins): the environment variable →
+`~/.config/ghn/config.toml` `[section] key` → the hardcoded default in `config.py`. The
+TOML file lives outside the working tree, so it applies the same whether run from the repo
+or after `uv tool install` (unlike a cwd-based dotenv). Sections: `[github]`
+(`enterprise_host`, `inbox_path`), `[backend]` (`backend`, `base_url`, `api_key`),
+`[model]` (`model_id`, `classifier_model_id`, `item_summary_max_tokens`,
+`run_summary_max_tokens`), `[llama]` (`spawn`, `binary`, `model`, `port`, `health_timeout`,
+`args`). Empty/whitespace-only values are treated as unset and fall through.
+
 ## Architecture
 
 Single linear pass, orchestrated by `pipeline.py:run_pipeline()` over 8 steps (documented
@@ -60,20 +72,21 @@ conventions:
 
 - **`pipeline.py`** — the orchestrator and the only place LLM sessions are opened. Holds
   all deterministic logic: Org-mode rendering/assembly, PR-template stripping, cutoff
-  normalization (local `#+DATE` ↔ ISO-8601 UTC), bucket routing, fold/carry-over
-  reconciliation, and the write→mark-Done sequencing.
+  normalization (local `#+DATE` ↔ ISO-8601 UTC), priority routing, fold/carry-over
+  reconciliation, priority-ordered assembly, and the write→mark-Done sequencing.
 - **`tools.py`** — the *only* module that shells out to `gh`. Every call goes through `_gh`,
-  which enforces an **allowlist of hosts and HTTP methods (GET + DELETE only)**. This makes
-  the destructive bulk `PUT /notifications -f read=true` mark-all-read call structurally
-  unreachable — do not weaken this. Mark-Done is per-thread `DELETE /notifications/threads/{id}`.
+  which enforces an **allowlist of hosts (`ALLOWED_HOSTS`, from config) and HTTP methods
+  (`ALLOWED_METHODS` = GET + DELETE only)**. This makes the destructive bulk
+  `PUT /notifications -f read=true` mark-all-read call structurally unreachable — do not
+  weaken this. Mark-Done is per-thread `DELETE /notifications/threads/{id}`.
 - **`slots.py`** — the two `@generative` LLM classifiers (`classify_filter_mode`,
   `classify_bucket`). Their behavior is specified entirely in the docstrings (body is `...`);
   to change classification rules, edit the docstring, not code.
 - **`schemas.py`** — Pydantic models for structured LLM output (`ItemRender`, `ActivityDelta`,
-  `RunSummary`) plus the `FilterMode` / `Bucket` Literals.
+  `RunSummary`) plus the `FilterMode` / `Bucket` Literals (`Bucket` = `"high" | "medium" | "low"`).
 - **`loader.py`** — pure text/JSON parsing: reads the existing inbox doc into a
   `{html_url: {block, last_seen}}` map and projects raw `gh` notification JSON.
-- **`config.py`** — scalar constants only (env-overridable: `GITHUB_INBOX_PATH`,
+- **`config.py`** — scalar constants only (env- and TOML-overridable: `GITHUB_INBOX_PATH`,
   `GITHUB_ENTERPRISE_HOST`, `GHN_*_MAX_TOKENS`, `GHN_BACKEND`, `GHN_BASE_URL`, `GHN_API_KEY`,
   `GHN_MODEL_ID`, `GHN_CLASSIFIER_MODEL_ID`, and the `GHN_LLAMA_*` spawn knobs). Lookup
   *tables* live in `pipeline.py`, not here. `BACKEND_KWARGS` (a dict) is the one exception to
@@ -81,6 +94,8 @@ conventions:
 - **`llama_server.py`** — the `spawned_llama_server()` context manager (start `llama-server`,
   poll `/health`, yield the base URL, terminate on exit). Only used when `GHN_LLAMA_SPAWN` is
   on; wired in `main.py`, not the pipeline.
+- **`main.py`** — CLI entry point (`ghn` script). Parses the natural-language request,
+  optionally wraps the run in `spawned_llama_server()`, runs the pipeline, prints the summary.
 
 ### Key invariants
 
@@ -104,12 +119,20 @@ conventions:
   block verbatim, and `_ensure_notes_line` back-fills an empty line onto pre-feature blocks
   without ever touching a typed note. Never parse, rewrite, or act on this text — like
   `:LAST_SEEN:`, it's drawer state the pipeline manages structurally, not content.
-- **Buckets are Action Required / Should Check / FYI.** Closed/merged items and draft PRs
-  are forced to FYI deterministically in `pipeline.py` (no model call); a live PR where the
-  user is still a requested reviewer is forced to Action Required deterministically (the
-  notification `reason` flips from `review_requested` to `comment` once the user comments,
-  so we key off `requested_reviewers`, not `reason`); everything else is classified by the
-  `classify_bucket` slot.
+- **The inbox is one flat, priority-ordered list — priority is an org tag, not a subsection.**
+  Every item is a top-level `*` heading carrying its priority as a trailing org tag
+  (`:high:` / `:medium:` / `:low:`); there are no `* High/Medium/Low Priority` section
+  headings (that layout, and the older `Action Required / Should Check / FYI` buckets, are
+  retired). Items are sorted most-important-first: priority rank (`high` → `medium` → `low`),
+  then recency within a tier. Position implies importance; the tag keeps priority visible and
+  searchable (org agenda tag-match). `_ensure_priority_tag` back-fills a tag idempotently onto
+  carried blocks that predate the tag layout. Closed/merged items and draft PRs are forced to
+  `low` deterministically in `pipeline.py` (no model call); a live PR where the user is still a
+  requested reviewer is forced to `high` deterministically (the notification `reason` flips
+  from `review_requested` to `comment` once the user comments, so we key off
+  `requested_reviewers`, not `reason`); everything else is classified by the `classify_bucket`
+  slot. **Assignees are shown for both issues and PRs**; Reviewers / Approved by / Reviewed by /
+  Merge queue rows are PR-only.
 
 ## Multi-host support
 
