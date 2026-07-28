@@ -20,13 +20,10 @@ class ItemRender(BaseModel):
     """
 
     summary: str = Field(
-        description="A substantive 3-5 sentence summary of the issue/PR: what it is about, its current state, and any open questions or blockers — enough context to act without clicking through. When a cleaned PR/issue description is provided, base the summary on it; ignore any leftover template scaffolding, checklists, or HTML comments.",
-    )
-    why_seeing: str = Field(
-        description="One human-readable line explaining why the user is seeing this (the 'Why you're seeing this' line).",
+        description="A substantive 3-5 sentence summary of the issue/PR: what it is about, its current state, and any open questions or blockers — enough context to act without clicking through. When a cleaned PR/issue description is provided, base the summary on it; ignore any leftover template scaffolding, checklists, or HTML comments. Write plain prose on a single line: no markdown bold/italics, no bullet or numbered lists.",
     )
     latest_activity: str = Field(
-        description="One line describing the most recent activity: who did what, with a brief excerpt if useful (1-2 sentences max).",
+        description="One line describing the most recent activity: who did what, with a brief excerpt if useful (1-2 sentences max). Return an empty string if no comment or review data was provided — do not guess or state that nothing happened. Plain prose only: no markdown, no lists.",
     )
 
 
@@ -38,7 +35,7 @@ class ActivityDelta(BaseModel):
     """
 
     delta: str = Field(
-        description="A 2-4 sentence summary of ONLY the new activity since the last run: who left a review and its state (approved / requested changes / commented), and any notable back-and-forth in new comments (e.g. 'markstur requested changes; AngeloDanducci replied that the docstring is fixed'). Name the people involved. Do not restate the item's original description.",
+        description="A 2-4 sentence summary of ONLY the new activity since the last run: who left a review and its state (approved / requested changes / commented), and any notable back-and-forth in new comments (e.g. 'markstur requested changes; AngeloDanducci replied that the docstring is fixed'). Name the people involved. Do not restate the item's original description. Write it as one paragraph of plain prose: no markdown bold/italics, no bullet or numbered lists, no line breaks.",
     )
 
 

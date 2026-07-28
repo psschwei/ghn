@@ -51,10 +51,12 @@ def classify_bucket(
     from others (e.g. "APPROVED", "CHANGES_REQUESTED", or "none"); `latest_comment_text`
     is the most recent comment body (may be empty).
 
-    Note: an outstanding review request (the user is still listed in the PR's
-    requested_reviewers) is forced to "high" deterministically upstream in pipeline.py —
-    you will not be called for those, so you need not infer it from `reason` (GitHub flips
-    `reason` from "review_requested" to "comment" once the user comments).
+    Note: direct involvement is decided deterministically upstream in pipeline.py, so you are
+    never called for it — an outstanding review request (the user is still listed in the PR's
+    requested_reviewers) and an item assigned to the user are both forced to "high" there.
+    You therefore need not infer either from `reason` (GitHub flips `reason` from
+    "review_requested" to "comment" once the user comments). Closed and merged items are
+    likewise forced to "low", and a draft PR with no direct involvement is forced to "low".
 
     Set `result` to one of:
       - "high" if ANY of:
@@ -73,8 +75,10 @@ def classify_bucket(
           * reason is "ci_activity" on the user's own PR and CI is failing.
       - "low" for everything else (subscribed repo activity, state changes on watched things).
 
-    Any closed or merged issue/PR, and any draft PR, always belongs in "low"
-    regardless of reason — there is no live action to take on it.
+    Any closed or merged issue/PR always belongs in "low" regardless of reason — there is no
+    live action to take on it. (A draft PR is NOT automatically "low": drafts are live, and a
+    mention or assignment on one is real work. pipeline.py already demotes drafts that carry no
+    direct involvement before calling you.)
 
     An approved PR the user authored belongs in "medium", never "high".
     """

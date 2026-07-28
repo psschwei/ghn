@@ -23,6 +23,10 @@ from typing import Any
 _PROP_RE = re.compile(r"^\s*:([A-Za-z0-9_]+):\s+(.*?)\s*$")
 # Any org heading line: one or more leading stars then a space.
 _HEADING_RE = re.compile(r"^(\*+)\s+(.*)$")
+# A priority org tag on a heading line (``* Title :high:``), possibly among other tags
+# (``* Title :waiting:high:``). Used to read a carried item's priority back out of the doc so
+# it can be preserved rather than reset.
+_PRIORITY_TAG_RE = re.compile(r":(high|medium|low):")
 # The doc-level ``#+DATE: 2026-06-16 18:01`` header (matches current_timestamp format).
 _DOC_DATE_RE = re.compile(r"^\s*#\+DATE:\s*(.+?)\s*$", re.IGNORECASE)
 
@@ -47,6 +51,12 @@ def read_existing_inbox(inbox_path: str | Path) -> dict[str, dict[str, Any]]:
     empty/absent (an auto-emitted empty ``:NOTES:`` line reads as ``None`` — nothing to
     carry). It is user-owned free text the pipeline never parses; it is threaded back through
     and re-emitted so a note the user typed survives every rebuild path.
+
+    ``priority`` is the ``:high:``/``:medium:``/``:low:`` org tag read off the item's heading, or
+    ``None`` for a block written before priority tags existed. The pipeline needs it to preserve
+    a carried-over item's priority: without it, an item that simply stops generating
+    notifications would be re-ranked to the bottom on every run, which inverts urgency (an
+    unattended review request goes quiet precisely *because* nobody is acting on it).
 
     Returns an empty map when the file does not exist (NO_EXISTING_INBOX).
     """
@@ -94,6 +104,7 @@ def read_existing_inbox(inbox_path: str | Path) -> dict[str, dict[str, Any]]:
                 "block": block,
                 "last_seen": _extract_prop(own_drawer, "LAST_SEEN"),
                 "notes": _extract_prop(own_drawer, "NOTES"),
+                "priority": _extract_priority(block_lines[0]),
             }
             i = j
         else:
@@ -144,6 +155,16 @@ def _own_drawer_lines(block_lines: list[str]) -> list[str]:
             break
         out.append(line)
     return out
+
+
+def _extract_priority(heading_line: str) -> str | None:
+    """Return the priority org tag on a heading line, or ``None`` if it carries none.
+
+    Matches the tag anywhere in the heading's tag group so a heading the user has added their own
+    tags to (``* Title :waiting:high:``) still reports its priority.
+    """
+    m = _PRIORITY_TAG_RE.search(heading_line)
+    return m.group(1) if m else None
 
 
 def _extract_prop(block_lines: list[str], name: str) -> str | None:

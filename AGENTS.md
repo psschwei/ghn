@@ -33,8 +33,9 @@ config. Verify changes by running the pipeline.
 
 - **`gh` CLI**, authenticated (`gh auth login`). All GitHub access goes through it; no
   token is embedded. An unauthenticated host is silently skipped.
-- **Ollama** running with the model pulled (default `granite4.1:8b` for summaries,
-  `granite4.1:3b` for classification). Backend/models are set in `ghn/config.py`
+- **Ollama** running with the model pulled (default `granite4.1:8b` for both summaries and
+  classification — 3B collapses `classify_bucket`'s whole "high" branch, so `assign`, `mention`
+  and `author`+CHANGES_REQUESTED never reach high priority). Backend/models are set in `ghn/config.py`
   (`BACKEND` / `MODEL_ID` / `CLASSIFIER_MODEL_ID`), all env-overridable. To use a hosted or
   OpenAI-compatible endpoint instead of local Ollama, set `GHN_BACKEND=openai` (or
   `litellm`) plus `GHN_BASE_URL` (endpoint) and `GHN_API_KEY`. `GHN_BASE_URL` also works for
@@ -60,8 +61,8 @@ Every runtime knob resolves in this order (first wins): the environment variable
 TOML file lives outside the working tree, so it applies the same whether run from the repo
 or after `uv tool install` (unlike a cwd-based dotenv). Sections: `[github]`
 (`enterprise_host`, `inbox_path`), `[backend]` (`backend`, `base_url`, `api_key`),
-`[model]` (`model_id`, `classifier_model_id`, `item_summary_max_tokens`,
-`run_summary_max_tokens`), `[llama]` (`spawn`, `binary`, `model`, `port`, `health_timeout`,
+`[model]` (`model_id`, `classifier_model_id`, `item_summary_max_tokens`),
+`[llama]` (`spawn`, `binary`, `model`, `port`, `health_timeout`,
 `args`). Empty/whitespace-only values are treated as unset and fall through.
 
 ## Architecture
@@ -126,13 +127,37 @@ conventions:
   retired). Items are sorted most-important-first: priority rank (`high` → `medium` → `low`),
   then recency within a tier. Position implies importance; the tag keeps priority visible and
   searchable (org agenda tag-match). `_ensure_priority_tag` back-fills a tag idempotently onto
-  carried blocks that predate the tag layout. Closed/merged items and draft PRs are forced to
-  `low` deterministically in `pipeline.py` (no model call); a live PR where the user is still a
-  requested reviewer is forced to `high` deterministically (the notification `reason` flips
-  from `review_requested` to `comment` once the user comments, so we key off
-  `requested_reviewers`, not `reason`); everything else is classified by the `classify_bucket`
-  slot. **Assignees are shown for both issues and PRs**; Reviewers / Approved by / Reviewed by /
-  Merge queue rows are PR-only.
+  carried blocks that predate the tag layout; `_set_priority_tag` *replaces* it on delta-mode
+  blocks, which are re-classified each run.
+- **The heading tag and the sort position must always agree.** They are written by different code
+  paths, so it is easy to break: the sort rank comes from `item["bucket"]`, the visible tag from
+  the block text. Three paths must stay in sync — full render (`render_item_subtree`), delta
+  (`render_activity_delta` → `_set_priority_tag`), and carried-over (which reads the prior tag
+  back via `loader`'s `priority` key). When they diverged, the doc was ordered by pure recency
+  while displaying `:high:` tags mid-list, so neither signal could be trusted.
+- **Carried-over items keep their previous priority; they are not reset to `low`.** An item goes
+  quiet precisely because nobody is acting on it, so demoting on silence inverts urgency. Blocks
+  with no tag to read (pre-tag-layout) still default to `low`.
+- **Priority overrides run in a fixed order** in `pipeline.py` (no model call): closed/merged →
+  `low` unconditionally; then direct involvement (still a `requested_reviewer`, or the user is an
+  assignee) → `high`, *including on drafts*; then draft with no involvement → `low`; everything
+  else goes to the `classify_bucket` slot. Involvement must outrank the draft demotion — a draft
+  is where colleagues @-mention or assign you, and demoting first buried exactly those items. We
+  key off `requested_reviewers`, not `reason`, because GitHub flips `review_requested` to
+  `comment` once the user comments.
+- **Model prose is flattened before it enters the doc (`flatten_prose`).** A column-0 `*` in
+  model output is an Org heading, and `loader` ends the item's subtree there — silently
+  destroying appended `*Update` history and any user prose below. The models do emit column-0
+  list markup despite the prompts, so this is enforced structurally, never by instruction alone.
+  `_compact_inline_updates` heals blocks written before this existed. **Assignees are shown for
+  both issues and PRs**; Reviewers / Approved by / Reviewed by / Merge queue rows are PR-only.
+- **The doc is backed up before every write** (`backup_inbox`, keeping the newest 10 as
+  `github.org.bak-<stamp>`). The overwrite is wholesale and the doc is the only record of the
+  inbox, so a bad fold would otherwise be unrecoverable. Best-effort: it never raises, so it
+  cannot block the write that actually persists the run.
+- **The run summary is deterministic — Step 8 makes no model call.** It used to ask a model to
+  paraphrase the four counts the pipeline had just computed, which cost a model load per run and
+  could misreport the run when the model echoed a count back wrong.
 
 ## Multi-host support
 
