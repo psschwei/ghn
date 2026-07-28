@@ -31,7 +31,7 @@ EMPTY_BUCKET_PLACEHOLDER: Final[str] = '/Nothing right now./'
 # the same whether run from the repo or after `uv tool install` (location-independent,
 # unlike a cwd-based dotenv). Sections: [github] (enterprise_host, inbox_path),
 # [backend] (backend, base_url, api_key), [model] (model_id, classifier_model_id,
-# item_summary_max_tokens, run_summary_max_tokens).
+# item_summary_max_tokens).
 _CONFIG_PATH: Final[str] = os.path.expanduser('~/.config/ghn/config.toml')
 
 
@@ -135,25 +135,28 @@ BACKEND_KWARGS: Final[dict[str, str]] = _build_backend_kwargs()
 # granite4.1:30b for the best quality, or set GHN_MODEL_ID back to granite4.1:3b to compare.
 MODEL_ID: Final[str] = _cfg('GHN_MODEL_ID', 'model', 'model_id', 'granite4.1:8b')
 
-# Classification (filter mode, priority bucket) is a small fixed-label pick, not prose —
-# 3B handles it fine, so we keep it on the cheaper/faster model rather than paying 8B
-# latency. Override with GHN_CLASSIFIER_MODEL_ID (e.g. to match MODEL_ID for comparison).
+# Classification (filter mode, priority bucket) emits a fixed label, but reaching that label
+# is not a simple pick: classify_bucket's spec (slots.py) is a multi-input rule set with nested
+# conditionals and cross-field exclusions. 3B collapses its whole "high" branch — `assign`,
+# `mention`+question, and `author`+CHANGES_REQUESTED all come back "medium", so the strongest
+# actionability signals GitHub emits never reach high priority. 8B follows all three correctly,
+# so classification defaults to 8B despite the added latency. Override with
+# GHN_CLASSIFIER_MODEL_ID (e.g. back to granite4.1:3b to compare).
 CLASSIFIER_MODEL_ID: Final[str] = _cfg(
-    'GHN_CLASSIFIER_MODEL_ID', 'model', 'classifier_model_id', 'granite4.1:3b'
+    'GHN_CLASSIFIER_MODEL_ID', 'model', 'classifier_model_id', 'granite4.1:8b'
 )
 
 LOOP_BUDGET: Final[int] = 3
 
-# Generation budgets (Ollama num_predict). Without these the backend falls back to
-# its small default, which truncates summaries to a bare-bones sentence or two.
-# Override with GHN_ITEM_SUMMARY_MAX_TOKENS / GHN_RUN_SUMMARY_MAX_TOKENS or the
-# [model] item_summary_max_tokens / run_summary_max_tokens keys. int() accepts both a
+# Generation budget for per-item prose (Ollama num_predict). Without it the backend falls back
+# to its small default, which truncates summaries to a bare-bones sentence or two. Override with
+# GHN_ITEM_SUMMARY_MAX_TOKENS or the [model] item_summary_max_tokens key. int() accepts both a
 # TOML integer and a string env value.
+#
+# There is no run-summary budget: the end-of-run summary is assembled deterministically from the
+# run's counts (pipeline._summary_headline), not generated, so it has no token cost.
 ITEM_SUMMARY_MAX_TOKENS: Final[int] = int(
     _cfg('GHN_ITEM_SUMMARY_MAX_TOKENS', 'model', 'item_summary_max_tokens', 1024)
-)
-RUN_SUMMARY_MAX_TOKENS: Final[int] = int(
-    _cfg('GHN_RUN_SUMMARY_MAX_TOKENS', 'model', 'run_summary_max_tokens', 512)
 )
 
 # === Self-hosted llama.cpp (spawn-per-run) ===

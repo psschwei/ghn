@@ -189,9 +189,8 @@ api_key  = "lm-studio"                     # GHN_API_KEY (openai / litellm only)
 
 [model]
 model_id                = "granite4.1:8b"  # GHN_MODEL_ID
-classifier_model_id     = "granite4.1:3b"  # GHN_CLASSIFIER_MODEL_ID
+classifier_model_id     = "granite4.1:8b"  # GHN_CLASSIFIER_MODEL_ID
 item_summary_max_tokens = 1024             # GHN_ITEM_SUMMARY_MAX_TOKENS
-run_summary_max_tokens  = 512              # GHN_RUN_SUMMARY_MAX_TOKENS
 
 [llama]                                    # self-hosted llama.cpp (spawn-per-run)
 spawn          = false                     # GHN_LLAMA_SPAWN

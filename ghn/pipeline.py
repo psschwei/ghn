@@ -9,13 +9,17 @@ Phase flow (SKILL.md Steps 1-8):
   4. Enrich each delta item (tools.enrich_*), gated by reason priority.
   5. Classify each item into a bucket (slots.classify_bucket) and render its prose
      (m.instruct(format=ItemRender)). Fold against the existing items by html_url.
-  6. Render + write the whole inbox doc (deterministic Org-mode assembly).
+  6. Back up, then render + write the whole inbox doc (deterministic Org-mode assembly).
   7. Confirm the write, then mark each folded thread Done (tools.mark_thread_done).
-  8. Generate a conversational run summary (m.instruct(format=RunSummary)).
+  8. Assemble the run summary from the run's counts (deterministic — no model call).
 
 KB notes baked in: KB1 (parse thunks), KB5 (one BaseModel per session — ItemRender,
-RunSummary, and each @generative slot's response model each get their own session),
+ActivityDelta, and each @generative slot's response model each get their own session),
 KB7 (persona via ModelOption.SYSTEM_PROMPT).
+
+All model-generated prose passes through ``flatten_prose`` before it enters the document: a
+column-0 ``*`` in model output is an Org heading, and would truncate the item on the next
+read. That guarantee is structural, not prompt-dependent.
 """
 
 from __future__ import annotations
@@ -40,7 +44,6 @@ from .config import (
     INBOX_PATH,
     ITEM_SUMMARY_MAX_TOKENS,
     MODEL_ID,
-    RUN_SUMMARY_MAX_TOKENS,
     ORG_TITLE,
     PREFIX_TEXT,
     SKIP_LOW_PRIORITY_COMMENT_FETCH,
@@ -82,6 +85,11 @@ REASON_REFERENCE: dict[str, str] = {
 _HIGH_PRIORITY: frozenset[str] = frozenset(
     r.strip() for r in HIGH_PRIORITY_REASONS.split(",") if r.strip()
 )
+
+# Priority sort rank: high floats to the top, then medium, then low. The inbox is one flat list
+# ordered most-important-first, so position implies importance (the priority is also carried as
+# an org tag on each heading). Maps 1:1 onto org's [#A]/[#B]/[#C] priority cookies.
+_PRIORITY_RANK: dict[str, int] = {"high": 0, "medium": 1, "low": 2}
 
 
 # --- KB1 thunk-parsing helpers ------------------------------------------------
@@ -175,6 +183,45 @@ def strip_pr_template(body: str | None) -> str:
             continue
         cleaned.append(line.rstrip())
     return "\n".join(cleaned).strip()
+
+
+def flatten_prose(text: str) -> str:
+    """Collapse model-generated prose to a single line safe to embed in an Org document.
+
+    Any line the model emits that starts with ``*`` at column 0 IS an Org heading. When such a
+    line lands inside an item's body, ``loader.read_existing_inbox`` ends the item's subtree
+    there on the next run — silently destroying every following line, including appended
+    ``*Update ...:*`` history and any prose the user typed. The models do emit column-0 list
+    markup (numbered lists, ``-``/``*`` bullets) despite the prompts, so this is enforced
+    structurally at the render boundary rather than asked for.
+
+    Newlines are collapsed to spaces (which also strips the leading-``*`` hazard, since only a
+    line *start* is a heading), leading list markers are dropped, markdown ``**bold**`` is
+    rewritten to Org's single-asterisk emphasis, and internal whitespace runs are squeezed.
+    Returns ``""`` for empty input.
+
+    The prompts already ask for plain prose; this enforces it. Small local models comply only
+    intermittently, and the cost of one non-compliant line is a truncated item, so the guarantee
+    belongs in code rather than in an instruction.
+    """
+    if not text:
+        return ""
+    parts: list[str] = []
+    for raw_line in str(text).replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        line = raw_line.strip()
+        if not line:
+            continue
+        # Drop a leading list marker ("- ", "* ", "1. ", "2) ") so collapsed bullets read as
+        # sentences rather than as run-together markup.
+        line = re.sub(r"^(?:[-*+]\s+|\d+[.)]\s+)", "", line)
+        if line:
+            parts.append(line)
+    out = re.sub(r"\s+", " ", " ".join(parts)).strip()
+    # Markdown emphasis -> Org emphasis: ``**x**``/``__x__`` are Org-meaningless and render
+    # literally. One asterisk is Org bold, and mid-line asterisks are not headings.
+    out = re.sub(r"\*\*(.+?)\*\*", r"*\1*", out)
+    out = re.sub(r"__(.+?)__", r"*\1*", out)
+    return out
 
 
 def _host_for(notif: dict[str, Any]) -> str:
@@ -284,6 +331,13 @@ def _enrich(
     if should_fetch_comment and notif.get("latest_comment_url"):
         latest_comment = tools.fetch_latest_comment(notif["latest_comment_url"], host)
 
+    # Is the item assigned to the user? `assignees` is already fetched for both issues and PRs
+    # (tools._PR_JQ / _ISSUE_JQ), and being personally assigned is the strongest actionability
+    # signal GitHub emits — but nothing derived it, so it never reached the priority decision.
+    login = logins.get(host, "")
+    assignees = [str(a).lower() for a in (enriched.get("assignees") or [])]
+    is_assignee = bool(login) and login.lower() in assignees
+
     html_url = enriched.get("html_url", subject_url)
     prior = existing.get(html_url)
     is_new = prior is None
@@ -306,6 +360,7 @@ def _enrich(
         "user_reviewed": user_reviewed,
         "latest_review_state": latest_review_state,
         "is_requested_reviewer": is_requested_reviewer,
+        "is_assignee": is_assignee,
         "review_summary": review_summary,
         "latest_comment": latest_comment,
         "is_new": is_new,
@@ -331,12 +386,20 @@ def render_item_subtree(item: dict[str, Any], render: ItemRender, level: int) ->
     (Assignees shown for both; the Reviewers/Approved/Reviewed/Merge-queue rows are
     PR-only), the generated summary, the "Why you're seeing this" line, and the "Latest
     activity" line.
+
+    "Why you're seeing this" is looked up from ``REASON_DISPLAY`` here rather than generated:
+    it is a pure function of the notification's ``reason``, so asking a model to phrase it only
+    invited drift (it sometimes returned a whole sentence about "the user"). "Latest activity"
+    is omitted entirely when the model had no comment to describe — ``ItemRender`` requires the
+    field, so with no source data it comes back empty or invented; an absent line is honest,
+    an empty one is not.
     """
     stars = "*" * level
     indent = " " * (level + 1)
     enriched = item.get("enriched", {})
     host = _host_for(item)
     is_pr = item.get("subject_type") == "PullRequest"
+    why_seeing = REASON_DISPLAY.get(str(item.get("reason", "")), "Repo activity")
 
     # Priority is carried as an org tag on the heading (``:high:``/``:medium:``/``:low:``)
     # rather than a subsection: the flat list's position implies importance, and the tag
@@ -395,12 +458,16 @@ def render_item_subtree(item: dict[str, Any], render: ItemRender, level: int) ->
         lines.append(f"{indent}| {key}{' ' * (width - len(key))} | {val} |")
     lines.append("")
 
-    lines.append(f"{indent}{render.summary}")
+    # Every model-generated line is flattened before it enters the document — a column-0 ``*``
+    # would otherwise be read as an Org heading next run and truncate the item (flatten_prose).
+    lines.append(f"{indent}{flatten_prose(render.summary)}")
     lines.append("")
-    lines.append(f"{indent}*Why you're seeing this:* {render.why_seeing}")
+    lines.append(f"{indent}*Why you're seeing this:* {why_seeing}")
     lines.append("")
-    lines.append(f"{indent}*Latest activity:* {render.latest_activity}")
-    lines.append("")
+    latest = flatten_prose(render.latest_activity)
+    if latest:
+        lines.append(f"{indent}*Latest activity:* {latest}")
+        lines.append("")
     return "\n".join(lines)
 
 
@@ -416,6 +483,9 @@ _FIRST_HEADING_RE = re.compile(r"^(\*+)[ \t]+(.*?)[ \t]*$", re.MULTILINE)
 # A trailing priority tag on a heading line (``... :high:`` / ``:medium:`` / ``:low:``),
 # possibly among other org tags (``:foo:high:``). Presence means "already tagged".
 _PRIORITY_TAG_RE = re.compile(r":(?:high|medium|low):[ \t]*$")
+# The same tag anywhere in the heading (not anchored), for substituting one priority for
+# another without disturbing adjacent user tags. See _set_priority_tag.
+_ANY_PRIORITY_TAG_RE = re.compile(r":(?:high|medium|low):")
 # The :PROPERTIES: drawer's terminating :END: (first :END: at a property indent); we insert
 # an empty :NOTES: line just before it so pre-feature carried blocks gain the line, too.
 _DRAWER_END_RE = re.compile(r"^(\s*):END:\s*$", re.MULTILINE)
@@ -471,13 +541,85 @@ def _normalize_stale_update_headings(block: str, level: int) -> str:
 
     def _inline(m: re.Match[str]) -> str:
         ts = m.group("ts").strip()
-        body = " ".join(line.strip() for line in m.group("body").splitlines() if line.strip())
+        body = flatten_prose(m.group("body"))
         line = f"{indent}*Update {ts}:*"
         if body:
             line += f" {body}"
         return line + "\n"
 
     return _STALE_UPDATE_HEADING_RE.sub(_inline, block)
+
+
+# The start of an inline ``*Update <ts>:*`` line written by an earlier run.
+_INLINE_UPDATE_START_RE = re.compile(r"^[ \t]*\*Update (?P<ts>[^*\n]*?):\*(?P<rest>.*)$")
+# A ``:PROPERTIES:`` / ``:URL:`` / ``:END:`` style drawer line — never update body text.
+_DRAWER_LINE_RE = re.compile(r"^[ \t]*:[A-Za-z_]+:")
+
+
+def _compact_inline_updates(block: str, level: int) -> str:
+    """Collapse each multi-line ``*Update ...:*`` entry in a carried block onto one line.
+
+    Runs before ``flatten_prose`` existed interpolated model output verbatim, so the doc contains
+    updates spanning many physical lines with markdown lists and ``**bold**`` at column 0. Those
+    lines are a latent hazard — one of them starting with ``*`` is an Org heading, and would
+    truncate the item on the next read — and they render as literal markup. This folds each such
+    entry back to the single-line form current runs produce, so carried blocks converge on the
+    correct shape instead of keeping their defects forever.
+
+    An update's body runs until the next ``*Update`` line, a genuine sibling Org heading, or a
+    drawer line. Both callers pass a single item's subtree so a sibling heading should not appear,
+    but a fold that swallowed one would silently delete an item, so the boundary is enforced here
+    rather than assumed. A column-0 ``* text`` bullet is body (it is what we are fixing); a
+    heading is distinguished by carrying a priority tag or a ``:URL:`` drawer beneath it, which a
+    stray bullet never does.
+
+    Idempotent: an already-single-line update re-emits itself unchanged.
+    """
+    indent = " " * (level + 1)
+    lines = block.split("\n")
+    out: list[str] = []
+    i = 0
+    while i < len(lines):
+        m = _INLINE_UPDATE_START_RE.match(lines[i])
+        if not m:
+            out.append(lines[i])
+            i += 1
+            continue
+        # Gather this update's body: the remainder of its own line plus every following line
+        # until a boundary.
+        parts = [m.group("rest")]
+        j = i + 1
+        while j < len(lines):
+            nxt = lines[j]
+            if _INLINE_UPDATE_START_RE.match(nxt) or _DRAWER_LINE_RE.match(nxt):
+                break
+            if _is_item_heading(nxt):
+                break
+            parts.append(nxt)
+            j += 1
+        body = flatten_prose("\n".join(parts))
+        line = f"{indent}*Update {m.group('ts').strip()}:*"
+        if body:
+            line += f" {body}"
+        out.append(line)
+        # Preserve one blank separator before whatever follows, matching render_activity_delta.
+        if j < len(lines) and lines[j].strip():
+            out.append("")
+        i = j
+    return "\n".join(out)
+
+
+def _is_item_heading(line: str) -> bool:
+    """True when a column-0 ``*`` line is a real item heading rather than a markdown bullet.
+
+    Item headings carry a priority org tag (``* Title :high:``) — every heading this pipeline
+    writes does, and ``_ensure_priority_tag`` back-fills the rest. A model-emitted ``* some text``
+    bullet has no tag, so the tag is the discriminator. Used to stop an update fold at an item
+    boundary while still absorbing bullets, which are the lines that cause truncation.
+    """
+    if not line.startswith("*") or line.startswith("**"):
+        return False
+    return bool(_PRIORITY_TAG_RE.search(line))
 
 
 def _bump_last_seen(block: str, new_last_seen: str) -> str:
@@ -536,6 +678,31 @@ def _ensure_priority_tag(block: str, priority: str) -> str:
     return block[: m.start()] + tagged + block[m.end() :]
 
 
+def _set_priority_tag(block: str, priority: str) -> str:
+    """Set a carried block's priority tag to ``priority``, replacing any tag already there.
+
+    The write-once counterpart to ``_ensure_priority_tag``. A delta-mode item is re-classified
+    every run, so its heading tag has to be rewritten to the fresh bucket; ``_ensure_priority_tag``
+    would skip it (being idempotent by design) and leave the *previous* run's tag on a heading the
+    pipeline is sorting by this run's rank — which is exactly how the tag and the item's position
+    came to contradict each other.
+
+    Any other org tags the user added are preserved: only the priority tag itself is swapped, and
+    a heading with no tag at all gets one appended.
+    """
+    m = _FIRST_HEADING_RE.search(block)
+    if not m:
+        return block
+    stars, title = m.group(1), m.group(2)
+    if _PRIORITY_TAG_RE.search(m.group(0)):
+        # Swap the priority tag in place, leaving neighbouring tags (``:waiting:high:``) alone.
+        title = _ANY_PRIORITY_TAG_RE.sub(f":{priority}:", title, count=1)
+        tagged = f"{stars} {title}"
+    else:
+        tagged = f"{stars} {title} :{priority}:"
+    return block[: m.start()] + tagged + block[m.end() :]
+
+
 def render_activity_delta(
     prev_block: str,
     item: dict[str, Any],
@@ -547,19 +714,34 @@ def render_activity_delta(
 
     Keeps the original item subtree verbatim except for (1) re-leveling its headings so the
     item heading sits at ``level`` (the item may have been re-bucketed to a different depth),
-    (2) advancing its :LAST_SEEN: to the notification's updated_at, and (3) back-filling an
+    (2) advancing its :LAST_SEEN: to the notification's updated_at, (3) back-filling an
     empty :NOTES: line if the carried block predates it (never touches a note the user
-    already typed). Then appends the new-activity prose inline under the item heading as an
+    already typed), and (4) rewriting the heading's priority tag to this run's bucket. Then
+    appends the new-activity prose inline under the item heading as an
     ``*Update <timestamp>:*`` line (mirroring ``*Latest activity:*``) — NOT a child heading,
     so it stays part of the parent item rather than splitting off its own org section.
+
+    (4) matters because the caller sorts this block by the *freshly computed* bucket. Leaving the
+    old tag in place made the heading disagree with the item's own position in the list, so
+    neither signal could be trusted — and an org agenda tag-match would miss items the pipeline
+    had actually ranked high.
     """
     releveled = _relevel_block(prev_block.rstrip("\n"), target_top_level=level)
     # Heal any stale ``*** Update`` heading a pre-fix run left in the carried block, so the
-    # item carries only inline update lines before we append the newest one.
-    healed = _normalize_stale_update_headings(releveled, level)
+    # item carries only inline update lines before we append the newest one, then fold any
+    # multi-line update an older run wrote back onto one line (see _compact_inline_updates).
+    healed = _compact_inline_updates(_normalize_stale_update_headings(releveled, level), level)
     bumped = _ensure_notes_line(_bump_last_seen(healed, str(item.get("updated_at") or "")))
+    bumped = _set_priority_tag(bumped, str(item.get("bucket", "low")))
     indent = " " * (level + 1)
-    out = [bumped.rstrip("\n"), "", f"{indent}*Update {timestamp}:* {delta.delta}", ""]
+    # flatten_prose is load-bearing, not cosmetic: a column-0 ``*`` line here would be parsed as
+    # an Org heading next run and truncate everything below it (see flatten_prose).
+    out = [
+        bumped.rstrip("\n"),
+        "",
+        f"{indent}*Update {timestamp}:* {flatten_prose(delta.delta)}",
+        "",
+    ]
     return "\n".join(out)
 
 
@@ -590,6 +772,59 @@ def confirm_inbox_written(inbox_path: str | Path) -> bool:
     """Write-gate (elem_023): inbox file exists and is non-empty before mark-Done."""
     p = Path(inbox_path)
     return p.exists() and p.stat().st_size > 0
+
+
+# How many timestamped backups of the inbox doc to keep (oldest pruned first).
+_BACKUP_KEEP: int = 10
+
+
+def backup_inbox(inbox_path: str | Path, *, keep: int = _BACKUP_KEEP) -> Path | None:
+    """Copy the current inbox doc aside before it is overwritten. Best-effort.
+
+    The doc is hand-curated and every run rewrites it wholesale, so a bad run (or a bug in the
+    fold) can destroy work that exists nowhere else — there is no other copy, and the fold is
+    driven by the doc's own contents. This writes ``<name>.bak-YYYYmmdd-HHMMSS`` next to the doc
+    before the overwrite and prunes to the newest ``keep``.
+
+    Returns the backup path, or ``None`` when there was nothing to back up. Never raises: a
+    failure here must not block the write, which is what actually persists the run's work.
+    """
+    p = Path(inbox_path)
+    try:
+        if not p.exists() or p.stat().st_size == 0:
+            return None
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        dest = p.with_name(f"{p.name}.bak-{stamp}")
+        dest.write_bytes(p.read_bytes())
+        # Prune oldest; names sort chronologically, so lexical order is chronological order.
+        existing = sorted(p.parent.glob(f"{p.name}.bak-*"))
+        for stale in existing[:-keep] if keep > 0 else existing:
+            try:
+                stale.unlink()
+            except OSError:
+                pass
+        return dest
+    except OSError:
+        return None
+
+
+def _summary_headline(new: int, refreshed: int, carried: int) -> str:
+    """Build the end-of-run headline from the run's counts (replaces a model call).
+
+    Reads as a sentence about what actually happened rather than a generated pleasantry:
+    "Added 2 new items and refreshed 3; 14 carried over."
+    """
+    parts: list[str] = []
+    if new:
+        parts.append(f"added {new} new item{'s' if new != 1 else ''}")
+    if refreshed:
+        parts.append(f"refreshed {refreshed}")
+    if not parts:
+        return "GitHub inbox updated — nothing new to fold in."
+    head = "GitHub inbox updated: " + " and ".join(parts)
+    if carried:
+        head += f"; {carried} carried over"
+    return head + "."
 
 
 # --- main orchestration -------------------------------------------------------
@@ -626,7 +861,7 @@ def run_pipeline(user_request: str = "", *, base_url: str | None = None) -> RunS
 
     # Step 3 (filter): classify the user's request into a filter mode.
     # Each @generative slot defines its own response model — give it its own session (KB5).
-    # Classification is a small fixed-label pick, so it runs on the cheaper CLASSIFIER_MODEL_ID.
+    # Runs on CLASSIFIER_MODEL_ID (see config.py for why that is no longer the smallest model).
     with start_session(backend, CLASSIFIER_MODEL_ID, **backend_kwargs) as m_filter:
         filter_mode = classify_filter_mode(m_filter, user_request=user_request or "")
     filter_mode = str(filter_mode)
@@ -654,22 +889,35 @@ def run_pipeline(user_request: str = "", *, base_url: str | None = None) -> RunS
 
     # Step 5 (classify): bucket each item. classify_bucket's response model is one
     # schema type, so a single dedicated session is safe for all bucket calls (KB5).
-    # Closed/merged issues+PRs and draft PRs are forced to Low Priority deterministically —
-    # these are unambiguous and we don't burn a model call (or trust the 3B model) on them.
-    # Bucketing is fixed-label classification, so it runs on the cheaper CLASSIFIER_MODEL_ID.
+    #
+    # Order matters here. Closed/merged items are demoted unconditionally — there is genuinely
+    # no action left on them. But *involvement* outranks the draft demotion: a draft PR is very
+    # much live, and it is the normal place a colleague @-mentions you or assigns you to ask a
+    # design question. Demoting drafts before checking involvement silently buried exactly those
+    # items, so the doc would show "You were mentioned" on a `:low:` heading.
     with start_session(backend, CLASSIFIER_MODEL_ID, **backend_kwargs) as m_bucket:
         for item in enriched_items:
             enriched = item.get("enriched", {})
             pr_state = _pr_state_summary(enriched)
-            if pr_state in ("closed", "merged", "draft"):
+
+            # Nothing to do on a finished item, whatever the involvement.
+            if pr_state in ("closed", "merged"):
                 item["bucket"] = "low"
                 continue
-            # An outstanding review request on a live PR is unambiguously High Priority,
-            # whatever the notification reason says — GitHub flips review_requested to
-            # comment once the user comments, which would otherwise demote it to Low.
-            if item.get("is_requested_reviewer"):
+
+            # Direct, unambiguous involvement -> high, even on a draft. An outstanding review
+            # request is authoritative regardless of the notification reason (GitHub flips
+            # review_requested to comment once the user comments, which would otherwise demote
+            # it); being the assignee is the strongest signal GitHub emits.
+            if item.get("is_requested_reviewer") or item.get("is_assignee"):
                 item["bucket"] = "high"
                 continue
+
+            # A draft with no direct involvement is still not actionable.
+            if pr_state == "draft":
+                item["bucket"] = "low"
+                continue
+
             comment_body = str((item.get("latest_comment") or {}).get("body", ""))
             item["bucket"] = str(
                 classify_bucket(
@@ -702,7 +950,6 @@ def run_pipeline(user_request: str = "", *, base_url: str | None = None) -> RunS
         for item in full_items:
             enriched = item.get("enriched", {})
             comment = item.get("latest_comment") or {}
-            why = REASON_DISPLAY.get(item.get("reason", ""), "Repo activity")
             # Surface review + merge-queue status to the model alongside the raw
             # PR fields so the summary can mention "approved by X" / "in merge queue".
             details = {
@@ -723,9 +970,8 @@ def run_pipeline(user_request: str = "", *, base_url: str | None = None) -> RunS
                 "Repository: {{ repo }}\n"
                 "Description (template scaffolding already removed): {{ description }}\n"
                 "Subject details (JSON): {{ details }}\n"
-                "Latest comment (JSON): {{ comment }}\n"
-                "Reason the user is seeing this: {{ why }}\n\n"
-                "Write a substantive 3-5 sentence summary that gives the user enough "
+                "Latest comment (JSON, empty when none was fetched): {{ comment }}\n\n"
+                "Write a substantive 3-5 sentence summary that gives the reader enough "
                 "context to decide what to do without clicking through: what the "
                 "issue/PR is about, its current state, and any open questions or "
                 "blockers. Base it on the Description when one is given (ignore any "
@@ -734,9 +980,14 @@ def run_pipeline(user_request: str = "", *, base_url: str | None = None) -> RunS
                 "state) rather than restating the title. For PRs, note approval status "
                 "(who has approved, from review_summary.approved_by) and whether it is "
                 "in the merge queue or has auto-merge enabled (merge_queue_status) when "
-                "relevant. Then write a one-line 'why you're seeing this' (use the "
-                "reason given), and a one-line latest-activity note (who did what, with "
-                "a short quoted excerpt if it clarifies the ask).",
+                "relevant. Then write a one-line latest-activity note (who did what, "
+                "with a short quoted excerpt if it clarifies the ask) — but if the "
+                "latest comment above is empty, return an empty string for it rather "
+                "than guessing or saying that nothing has happened.\n\n"
+                "Address the reader directly as 'you'; never refer to them in the third "
+                "person as 'the user'. Output plain prose only — this text goes into an "
+                "Org-mode document, so do not use markdown bold/italics, bullet lists, "
+                "or numbered lists anywhere.",
                 user_variables={
                     "subject_type": str(item.get("subject_type", "")),
                     "title": str(item.get("title", "")),
@@ -744,7 +995,6 @@ def run_pipeline(user_request: str = "", *, base_url: str | None = None) -> RunS
                     "description": description,
                     "details": str(details),
                     "comment": str(comment),
-                    "why": str(why),
                 },
                 model_options={
                     ModelOption.SYSTEM_PROMPT: PREFIX_TEXT,
@@ -752,12 +1002,15 @@ def run_pipeline(user_request: str = "", *, base_url: str | None = None) -> RunS
                 },
                 format=ItemRender,
             )
+            # On a parse failure fall back to the title as the summary and NO activity line —
+            # the old fallback put the raw updated_at timestamp in the prose slot, which read as
+            # an activity description but carried no information. render_item_subtree omits the
+            # line entirely when it's empty.
             render = _safe_parse_with_fallback(
                 render_thunk,
                 ItemRender,
                 summary=str(item.get("title", "")),
-                why_seeing=why,
-                latest_activity=str(item.get("updated_at", "")),
+                latest_activity="",
             )
             url = item.get("html_url", "")
             rendered[url] = (item, render)
@@ -775,7 +1028,11 @@ def run_pipeline(user_request: str = "", *, base_url: str | None = None) -> RunS
                 "Write 2-4 sentences naming who did what: new reviews and their state "
                 "(approved / requested changes / commented), and any notable "
                 "back-and-forth in the new comments. Quote a short excerpt only when it "
-                "clarifies the ask. If there is genuinely little new, say so briefly.",
+                "clarifies the ask. If there is genuinely little new, say so briefly.\n\n"
+                "Address the reader directly as 'you'; never refer to them in the third "
+                "person as 'the user'. Write it as ONE paragraph of plain prose — this "
+                "text goes into an Org-mode document, so do not use markdown "
+                "bold/italics, bullet lists, numbered lists, or line breaks.",
                 user_variables={
                     "subject_type": str(item.get("subject_type", "")),
                     "title": str(item.get("title", "")),
@@ -791,7 +1048,8 @@ def run_pipeline(user_request: str = "", *, base_url: str | None = None) -> RunS
             delta = _safe_parse_with_fallback(
                 delta_thunk,
                 ActivityDelta,
-                delta=str(item.get("updated_at", "")),
+                delta=f"New activity on {item.get('updated_at', 'this item')} "
+                "(summary unavailable).",
             )
             delta_rendered[url] = (item, delta)
 
@@ -805,11 +1063,6 @@ def run_pipeline(user_request: str = "", *, base_url: str | None = None) -> RunS
     carried_over_count = len(carried_urls)
 
     high_priority_titles: list[str] = []
-
-    # Priority sort rank: high floats to the top, then medium, then low. The inbox is one
-    # flat list ordered most-important-first, so position implies importance (the priority
-    # is also carried as an org tag on each heading).
-    _PRIORITY_RANK = {"high": 0, "medium": 1, "low": 2}
 
     # Every item is now a top-level `*` heading (no priority subsection to nest under); its
     # priority lives in the heading's org tag instead.
@@ -841,20 +1094,33 @@ def run_pipeline(user_request: str = "", *, base_url: str | None = None) -> RunS
             ),
         )
 
-    # Carried-over items keep their original subtree text verbatim (including any :NOTES:
-    # the user typed). Per Step 5 untouched items are not re-classified, so they default to
-    # low priority (they sink to the bottom of the list) rather than being re-bucketed. We
-    # heal any stale ``*** Update`` heading a pre-fix run left behind so it can never
+    # Carried-over items keep their original subtree text verbatim (including any :NOTES: the
+    # user typed). GitHub reported no new activity on them, so they are not re-classified — they
+    # KEEP the priority they were last given, read back off their own heading tag by the loader.
+    #
+    # They used to be pinned to `low` instead, which inverted urgency: an item goes quiet
+    # precisely because nobody is acting on it, so an unattended review request would sink below
+    # fresh `subscribed` noise on every run while still displaying a stale `:high:` tag. Blocks
+    # written before priority tags existed have no tag to read and still fall back to `low`.
+    #
+    # We also heal any stale ``*** Update`` heading a pre-fix run left behind so it can never
     # resurface as a subheading, re-level it to a top-level `*` heading, back-fill an empty
-    # :NOTES: line for blocks that predate it, and back-fill a :low: priority tag for blocks
-    # written before tags existed (idempotent — a block that already has a tag is untouched).
+    # :NOTES: line for blocks that predate it, and back-fill the priority tag when absent
+    # (idempotent — a block that already has a tag is untouched).
     for url in carried_urls:
-        healed = _normalize_stale_update_headings(
-            existing[url]["block"], level=_item_level({})
-        )
+        prior = existing[url]
+        priority = str(prior.get("priority") or "low")
+        healed = _normalize_stale_update_headings(prior["block"], level=_item_level({}))
         healed = _relevel_block(healed.rstrip("\n"), target_top_level=_item_level({}))
-        healed = _ensure_notes_line(_ensure_priority_tag(healed, "low"))
-        entries.append((_PRIORITY_RANK["low"], str(existing[url].get("last_seen") or ""), healed))
+        healed = _compact_inline_updates(healed, level=_item_level({}))
+        healed = _ensure_notes_line(_ensure_priority_tag(healed, priority))
+        entries.append(
+            (
+                _PRIORITY_RANK.get(priority, 2),
+                str(prior.get("last_seen") or ""),
+                healed,
+            )
+        )
 
     # Sort in two stable passes (clearer than inverting both keys at once): first by recency
     # descending, then by priority rank ascending. Python's sort is stable, so within a
@@ -864,8 +1130,12 @@ def run_pipeline(user_request: str = "", *, base_url: str | None = None) -> RunS
     ordered = [block for _, _, block in entries]
 
     # Step 6: write the doc (BEFORE marking Done — the irreversible commit point).
+    # Back up the outgoing copy first: this overwrite is wholesale and the doc is the only
+    # record of the inbox, so a bad fold would otherwise be unrecoverable. Best-effort by
+    # design — backup_inbox never raises, so it cannot block the write.
     doc = render_inbox_org(ordered, current_timestamp())
     inbox_path.parent.mkdir(parents=True, exist_ok=True)
+    backup_inbox(inbox_path)
     inbox_path.write_text(doc, encoding="utf-8")
 
     # Step 7: confirm the write, then mark each folded thread Done (per-thread DELETE).
@@ -878,36 +1148,21 @@ def run_pipeline(user_request: str = "", *, base_url: str | None = None) -> RunS
                 except tools.GitHubToolError:
                     pass  # leave the thread in the inbox; safe to retry next run
 
-    # Step 8: conversational summary. RunSummary is its own schema -> own session (KB5).
+    # Step 8: run summary — assembled deterministically, no model call.
+    #
+    # This used to be an m.instruct(format=RunSummary) whose entire input was the four counts
+    # below, already computed here, and whose output schema restated them. It cost a model load
+    # per run to paraphrase numbers it was handed, and could get them *wrong* — main.py prints
+    # summary.new_count, so a model that echoed a count back inaccurately reported the run
+    # inaccurately. The headline is the only genuinely free-text field, and one built from the
+    # counts says more than a generated pleasantry.
     most_important = (
         "; ".join(high_priority_titles[:3])
         if high_priority_titles
         else "No High Priority items this run."
     )
-    with start_session(backend, MODEL_ID, **backend_kwargs) as m_summary:
-        summary_thunk = m_summary.instruct(
-            "Write a short, friendly summary of this GitHub inbox update.\n"
-            "New items added: {{ new }}\n"
-            "Existing items updated with new activity (a dated delta was appended): {{ refreshed }}\n"
-            "Items carried over untouched: {{ carried }}\n"
-            "Most important High Priority item(s): {{ important }}\n\n"
-            "Include a one-line reminder that items stay in the inbox until removed by hand.",
-            user_variables={
-                "new": str(new_count),
-                "refreshed": str(refreshed_count),
-                "carried": str(carried_over_count),
-                "important": most_important,
-            },
-            model_options={
-                ModelOption.SYSTEM_PROMPT: PREFIX_TEXT,
-                ModelOption.MAX_NEW_TOKENS: RUN_SUMMARY_MAX_TOKENS,
-            },
-            format=RunSummary,
-        )
-    return _safe_parse_with_fallback(
-        summary_thunk,
-        RunSummary,
-        headline="GitHub inbox updated.",
+    return RunSummary(
+        headline=_summary_headline(new_count, refreshed_count, carried_over_count),
         new_count=new_count,
         refreshed_count=refreshed_count,
         carried_over_count=carried_over_count,
