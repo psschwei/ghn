@@ -86,19 +86,26 @@ Distinct from the design weaknesses above — these get fixed, not designed arou
 
 ---
 
-## Tier 0 — free wins
+## Tier 0 — free wins — DONE (commit `fa821dc`)
 
-Minutes of work, no design risk. **Start here.**
-
-| # | Change | Where |
+| # | Change | Status |
 |---|---|---|
-| 0.1 | Set `GHN_CLASSIFIER_MODEL_ID=granite4.1:8b`. Zero code; recovers all four collapsed branches. | `config.py:141-143` or `~/.config/ghn/config.toml` |
-| 0.2 | Newline-guard the delta — strip/re-indent newlines before interpolating. Closes B1. | `pipeline.py:562` |
-| 0.3 | Write a timestamped backup before the doc write. Closes B2. | `pipeline.py:869` |
-| 0.4 | Add `_set_priority_tag` (replaces rather than skips) and have the loader parse the tag back. Fixes the sort/tag divergence. | `pipeline.py:521-536`, `loader.py:93-97` |
-| 0.5 | Reorder so involvement outranks the draft override; keep the unconditional demotion for closed/merged only. | `pipeline.py:663-672` |
-| 0.6 | Compute `why_seeing` deterministically from `REASON_DISPLAY`; drop it from `ItemRender`. | `pipeline.py:400`, `schemas.py:25-27` |
-| 0.7 | Delete the Step 8 `RunSummary` model call — it asks a model to echo back four integers the pipeline already computed, costing a model load per run for a constant string. | `pipeline.py:887-916` |
+| 0.1 | Classifier default → `granite4.1:8b`. | done — recovers all four collapsed branches |
+| 0.2 | `flatten_prose` sanitizes all model output at the render boundary. Closes **B1**, and **B4** as a side effect. | done — plus `_compact_inline_updates` to heal existing blocks |
+| 0.3 | `backup_inbox` writes `github.org.bak-<stamp>` before each overwrite, keeping 10. Closes **B2**. | done |
+| 0.4 | `_set_priority_tag` (replaces rather than skips) + `loader` returns a `priority` key. Fixes the tag/sort divergence **and** the carried-item decay. | done |
+| 0.5 | Involvement outranks the draft demotion; closed/merged still unconditional. Also derives `is_assignee`, which was fetched and never used. | done |
+| 0.6 | `why_seeing` looked up from `REASON_DISPLAY`; `latest_activity` omitted rather than emitted empty. Closes **B3**. | done |
+| 0.7 | Step 8 `RunSummary` model call deleted; headline built from the counts. Drops the now-dead `run_summary_max_tokens` knob. | done |
+
+Verified against the real notification feed with mark-Done suppressed: correct priority order,
+zero empty activity lines, zero markdown leakage, no truncation, `:NOTES:` preserved, backup
+written, and the update fold idempotent per block.
+
+Still open from the bug list: **B5** (persona leak — only in prose written by earlier runs; new
+prose is clean), **B7** (litellm `api_key` crash), **B8** (`REASON_REFERENCE` /
+`_parse_instruct_result` still dead — likely inputs to 2.11), **B9** (single-backend limit,
+blocks 1.10), **B10** (`_gh` method allowlist).
 
 ## Tier 1 — cheap and high-impact
 
