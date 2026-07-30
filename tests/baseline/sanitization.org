@@ -1,7 +1,7 @@
 #+TITLE: GitHub Inbox
 #+DATE: 2026-07-30 09:00
 
-* Refactor the config loader :high:
+* acme/widgets: Refactor the config loader :high:
   :PROPERTIES:
   :URL:  https://github.com/acme/widgets/pull/300
   :HOST: github.com

@@ -1,7 +1,7 @@
 #+TITLE: GitHub Inbox
 #+DATE: 2026-07-30 09:00
 
-* Roll back the cache TTL change :high:
+* acme/widgets: Roll back the cache TTL change :high:
   :PROPERTIES:
   :URL:  https://github.com/acme/widgets/issues/88
   :HOST: github.com

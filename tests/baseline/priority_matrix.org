@@ -1,7 +1,7 @@
 #+TITLE: GitHub Inbox
 #+DATE: 2026-07-30 09:00
 
-* Wire retry budget into the scheduler :high:
+* acme/widgets: Wire retry budget into the scheduler :high:
   :PROPERTIES:
   :URL:  https://github.com/acme/widgets/issues/101
   :HOST: github.com
@@ -24,7 +24,7 @@
 
   *Latest activity:* prodlead asked whether you can take this before the v2 cut.
 
-* Add structured logging to the ingest worker :high:
+* acme/widgets: Add structured logging to the ingest worker :high:
   :PROPERTIES:
   :URL:  https://github.com/acme/widgets/pull/210
   :HOST: github.com
@@ -49,7 +49,7 @@
 
   *Why you're seeing this:* Review requested
 
-* Spike: pluggable storage backends :low:
+* acme/widgets: Spike: pluggable storage backends :low:
   :PROPERTIES:
   :URL:  https://github.com/acme/widgets/pull/230
   :HOST: github.com
@@ -76,7 +76,7 @@
 
   *Latest activity:* contributor-b asked whether the interface needs to cover streaming writes or if batch is enough for now.
 
-* Fix off-by-one in pagination cursor :low:
+* acme/widgets: Fix off-by-one in pagination cursor :low:
   :PROPERTIES:
   :URL:  https://github.com/acme/widgets/pull/198
   :HOST: github.com
@@ -101,7 +101,7 @@
 
   *Why you're seeing this:* Activity on your PR/issue
 
-* Bump actions/checkout to v5 :low:
+* acme/widgets: Bump actions/checkout to v5 :low:
   :PROPERTIES:
   :URL:  https://github.com/acme/widgets/pull/241
   :HOST: github.com

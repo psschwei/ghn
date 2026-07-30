@@ -405,7 +405,10 @@ def render_item_subtree(item: dict[str, Any], render: ItemRender, level: int) ->
     # rather than a subsection: the flat list's position implies importance, and the tag
     # keeps it visible and searchable (C-c \ / agenda tag-match).
     bucket = str(item.get("bucket", "low"))
-    lines = [f"{stars} {item.get('title', '(untitled)')} :{bucket}:"]
+    repo = str(item.get("repo_full_name", "")).strip()
+    title = str(item.get("title", "(untitled)"))
+    heading = f"{repo}: {title}" if repo else title
+    lines = [f"{stars} {heading} :{bucket}:"]
     lines.append(f"{indent}:PROPERTIES:")
     lines.append(f"{indent}:URL:  {item.get('html_url', '')}")
     lines.append(f"{indent}:HOST: {host}")
