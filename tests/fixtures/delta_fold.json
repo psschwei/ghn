@@ -1,0 +1,64 @@
+{
+  "now": "2026-07-30 09:00",
+  "filter_mode": "all",
+  "logins": { "github.com": "octdeveloper" },
+  "existing_inbox": "#+TITLE: GitHub Inbox\n#+DATE: 2026-07-29 09:00\n\n* Add rate limiting to the public API :high:\n :PROPERTIES:\n :URL:  https://github.com/acme/widgets/pull/150\n :HOST: github.com\n :LAST_SEEN: 2026-07-29T09:00:00Z\n :NOTES: ping me after CI is green\n :END:\n https://github.com/acme/widgets/pull/150\n\n | Field       | Value |\n |-------------+-------|\n | State       | open |\n | Author      | octdeveloper |\n | Assignees   | — |\n | Reviewers   | reviewer-x |\n | Approved by | — |\n | Reviewed by | — |\n | Merge queue | — |\n | Labels      | api |\n | Milestone   | v2 |\n\n Your PR adds token-bucket rate limiting to the public API. It is open and awaiting review from reviewer-x.\n\n *Why you're seeing this:* Activity on your PR/issue\n",
+  "notifications": [
+    {
+      "host": "github.com",
+      "raw": {
+        "id": "t-delta",
+        "reason": "author",
+        "updated_at": "2026-07-30T08:15:00Z",
+        "subject": {
+          "title": "Add rate limiting to the public API",
+          "type": "PullRequest",
+          "url": "repos/acme/widgets/pulls/150",
+          "latest_comment_url": "repos/acme/widgets/issues/comments/9200"
+        },
+        "repository": { "full_name": "acme/widgets" }
+      },
+      "enrich": {
+        "html_url": "https://github.com/acme/widgets/pull/150",
+        "state": "open",
+        "merged": false,
+        "draft": false,
+        "user": "octdeveloper",
+        "requested_reviewers": ["reviewer-x"],
+        "assignees": [],
+        "labels": ["api"],
+        "milestone": "v2",
+        "review_comments": 2,
+        "comments": 3,
+        "mergeable_state": "blocked",
+        "auto_merge": false,
+        "auto_merge_enabled_by": null,
+        "body": "## Description\nAdds token-bucket rate limiting to the public API.",
+        "created_at": "2026-07-26T10:00:00Z"
+      },
+      "review_summary": { "approved_by": [], "changes_requested_by": ["reviewer-x"], "commented_by": [] },
+      "review_state": { "own": "none", "others": "CHANGES_REQUESTED" },
+      "latest_comment": {
+        "author": "reviewer-x",
+        "body": "The limiter looks good but please add a test for the burst case.",
+        "created_at": "2026-07-30T08:15:00Z"
+      },
+      "new_comments": [
+        {
+          "author": "reviewer-x",
+          "body": "The limiter looks good but please add a test for the burst case.",
+          "created_at": "2026-07-30T08:15:00Z"
+        }
+      ],
+      "new_reviews": [
+        {
+          "author": "reviewer-x",
+          "state": "CHANGES_REQUESTED",
+          "submitted_at": "2026-07-30T08:14:00Z",
+          "body": "Needs a burst-case test."
+        }
+      ],
+      "delta_prose": "reviewer-x requested changes, asking you to add a test for the burst case before the rate limiter can be approved."
+    }
+  ]
+}

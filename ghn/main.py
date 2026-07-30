@@ -16,7 +16,8 @@ from .llama_server import LlamaServerError, spawned_llama_server
 from .pipeline import run_pipeline
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
     parser = argparse.ArgumentParser(
         prog="ghn",
         description=(
@@ -33,7 +34,15 @@ def main() -> int:
             "'review requests'. Omit for a full update with no filter."
         ),
     )
-    args = parser.parse_args()
+    # `ghn eval [...]` is a dev subcommand (offline pipeline eval), not a notification
+    # request — dispatch it before argparse so its own flags (--update, --filter) don't
+    # collide with the free-form request parser, and so `ghn "only PRs"` is untouched.
+    if argv and argv[0] == "eval":
+        from .eval import run_eval
+
+        return run_eval(argv[1:])
+
+    args = parser.parse_args(argv)
 
     user_request = " ".join(args.request).strip()
 

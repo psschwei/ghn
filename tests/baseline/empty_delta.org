@@ -1,0 +1,23 @@
+#+TITLE: GitHub Inbox
+#+DATE: 2026-07-29 09:00
+
+* Review the onboarding doc :low:
+ :PROPERTIES:
+ :URL:  https://github.com/acme/widgets/issues/12
+ :HOST: github.com
+ :LAST_SEEN: 2026-07-29T09:00:00Z
+ :NOTES:
+ :END:
+ https://github.com/acme/widgets/issues/12
+
+ | Field     | Value |
+ |-----------+-------|
+ | State     | open |
+ | Author    | docs-team |
+ | Assignees | — |
+ | Labels    | docs |
+ | Milestone | — |
+
+ A request to review the onboarding doc for accuracy. Low urgency.
+
+ *Why you're seeing this:* Repo activity

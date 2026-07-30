@@ -1,0 +1,198 @@
+{
+  "now": "2026-07-30 09:00",
+  "filter_mode": "all",
+  "logins": { "github.com": "octdeveloper" },
+  "notifications": [
+    {
+      "host": "github.com",
+      "raw": {
+        "id": "t-assign",
+        "reason": "assign",
+        "updated_at": "2026-07-30T08:40:00Z",
+        "subject": {
+          "title": "Wire retry budget into the scheduler",
+          "type": "Issue",
+          "url": "repos/acme/widgets/issues/101",
+          "latest_comment_url": "repos/acme/widgets/issues/comments/9001"
+        },
+        "repository": { "full_name": "acme/widgets" }
+      },
+      "enrich": {
+        "html_url": "https://github.com/acme/widgets/issues/101",
+        "state": "open",
+        "user": "prodlead",
+        "assignees": ["octdeveloper"],
+        "labels": ["backend"],
+        "milestone": "v2",
+        "comments": 3,
+        "body": "The scheduler drops jobs under load. Assigning to you to add a retry budget.",
+        "created_at": "2026-07-28T10:00:00Z"
+      },
+      "latest_comment": {
+        "author": "prodlead",
+        "body": "Can you take this before the v2 cut?",
+        "created_at": "2026-07-30T08:40:00Z"
+      },
+      "prose": {
+        "summary": "You have been assigned to add a retry budget to the scheduler, which currently drops jobs under load. It is open against the v2 milestone with a backend label. prodlead is asking whether you can land it before the v2 cut.",
+        "latest_activity": "prodlead asked whether you can take this before the v2 cut."
+      }
+    },
+    {
+      "host": "github.com",
+      "raw": {
+        "id": "t-review-req",
+        "reason": "review_requested",
+        "updated_at": "2026-07-30T08:20:00Z",
+        "subject": {
+          "title": "Add structured logging to the ingest worker",
+          "type": "PullRequest",
+          "url": "repos/acme/widgets/pulls/210",
+          "latest_comment_url": ""
+        },
+        "repository": { "full_name": "acme/widgets" }
+      },
+      "enrich": {
+        "html_url": "https://github.com/acme/widgets/pull/210",
+        "state": "open",
+        "merged": false,
+        "draft": false,
+        "user": "contributor-a",
+        "requested_reviewers": ["octdeveloper"],
+        "assignees": [],
+        "labels": ["observability"],
+        "milestone": null,
+        "review_comments": 0,
+        "comments": 1,
+        "mergeable_state": "clean",
+        "auto_merge": false,
+        "auto_merge_enabled_by": null,
+        "body": "## Description\nAdds structured JSON logging to the ingest worker.",
+        "created_at": "2026-07-29T14:00:00Z"
+      },
+      "review_state": { "own": "none", "others": "none" },
+      "prose": {
+        "summary": "This PR adds structured JSON logging to the ingest worker and is open with a clean mergeable state. You are a requested reviewer and have not yet reviewed it. There is one comment and no reviews so far.",
+        "latest_activity": ""
+      }
+    },
+    {
+      "host": "github.com",
+      "raw": {
+        "id": "t-draft-mention",
+        "reason": "mention",
+        "updated_at": "2026-07-30T07:55:00Z",
+        "subject": {
+          "title": "Spike: pluggable storage backends",
+          "type": "PullRequest",
+          "url": "repos/acme/widgets/pulls/230",
+          "latest_comment_url": "repos/acme/widgets/issues/comments/9100"
+        },
+        "repository": { "full_name": "acme/widgets" }
+      },
+      "enrich": {
+        "html_url": "https://github.com/acme/widgets/pull/230",
+        "state": "open",
+        "merged": false,
+        "draft": true,
+        "user": "contributor-b",
+        "requested_reviewers": [],
+        "assignees": [],
+        "labels": ["design"],
+        "milestone": null,
+        "review_comments": 2,
+        "comments": 4,
+        "mergeable_state": "draft",
+        "auto_merge": false,
+        "auto_merge_enabled_by": null,
+        "body": "## Description\nExploring a storage backend interface. Not ready yet.",
+        "created_at": "2026-07-27T09:00:00Z"
+      },
+      "latest_comment": {
+        "author": "contributor-b",
+        "body": "@octdeveloper does the interface need to cover streaming writes, or is batch enough for now?",
+        "created_at": "2026-07-30T07:55:00Z"
+      },
+      "prose": {
+        "summary": "This is a draft PR exploring a pluggable storage backend interface, not yet ready to merge. contributor-b has @-mentioned you with a design question about whether the interface must cover streaming writes. It carries a design label and has some review comments already.",
+        "latest_activity": "contributor-b asked whether the interface needs to cover streaming writes or if batch is enough for now."
+      }
+    },
+    {
+      "host": "github.com",
+      "raw": {
+        "id": "t-merged",
+        "reason": "author",
+        "updated_at": "2026-07-30T06:30:00Z",
+        "subject": {
+          "title": "Fix off-by-one in pagination cursor",
+          "type": "PullRequest",
+          "url": "repos/acme/widgets/pulls/198",
+          "latest_comment_url": ""
+        },
+        "repository": { "full_name": "acme/widgets" }
+      },
+      "enrich": {
+        "html_url": "https://github.com/acme/widgets/pull/198",
+        "state": "closed",
+        "merged": true,
+        "draft": false,
+        "user": "octdeveloper",
+        "requested_reviewers": [],
+        "assignees": [],
+        "labels": ["bug"],
+        "milestone": "v2",
+        "review_comments": 1,
+        "comments": 2,
+        "mergeable_state": "clean",
+        "auto_merge": false,
+        "auto_merge_enabled_by": null,
+        "body": "## Description\nFixes an off-by-one in the pagination cursor.",
+        "created_at": "2026-07-25T12:00:00Z"
+      },
+      "review_summary": { "approved_by": ["senior-eng"], "changes_requested_by": [], "commented_by": [] },
+      "review_state": { "own": "none", "others": "APPROVED" },
+      "prose": {
+        "summary": "Your PR fixing an off-by-one in the pagination cursor has been merged into the v2 milestone. It was approved by senior-eng. No further action is needed.",
+        "latest_activity": ""
+      }
+    },
+    {
+      "host": "github.com",
+      "raw": {
+        "id": "t-subscribed",
+        "reason": "subscribed",
+        "updated_at": "2026-07-30T05:00:00Z",
+        "subject": {
+          "title": "Bump actions/checkout to v5",
+          "type": "PullRequest",
+          "url": "repos/acme/widgets/pulls/241",
+          "latest_comment_url": ""
+        },
+        "repository": { "full_name": "acme/widgets" }
+      },
+      "enrich": {
+        "html_url": "https://github.com/acme/widgets/pull/241",
+        "state": "open",
+        "merged": false,
+        "draft": false,
+        "user": "dependabot[bot]",
+        "requested_reviewers": [],
+        "assignees": [],
+        "labels": ["dependencies"],
+        "milestone": null,
+        "review_comments": 0,
+        "comments": 0,
+        "mergeable_state": "clean",
+        "auto_merge": true,
+        "auto_merge_enabled_by": "octmaintainer",
+        "body": "Bumps actions/checkout from v4 to v5.",
+        "created_at": "2026-07-30T05:00:00Z"
+      },
+      "prose": {
+        "summary": "A Dependabot PR bumping actions/checkout from v4 to v5, with auto-merge armed by octmaintainer. It is routine repo activity you are subscribed to and needs no action from you.",
+        "latest_activity": ""
+      }
+    }
+  ]
+}

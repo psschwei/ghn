@@ -1,0 +1,7 @@
+{
+  "now": "2026-07-30 09:00",
+  "filter_mode": "all",
+  "logins": { "github.com": "octdeveloper" },
+  "existing_inbox": "#+TITLE: GitHub Inbox\n#+DATE: 2026-07-29 09:00\n\n* Review the onboarding doc :low:\n :PROPERTIES:\n :URL:  https://github.com/acme/widgets/issues/12\n :HOST: github.com\n :LAST_SEEN: 2026-07-29T09:00:00Z\n :NOTES:\n :END:\n https://github.com/acme/widgets/issues/12\n\n | Field     | Value |\n |-----------+-------|\n | State     | open |\n | Author    | docs-team |\n | Assignees | — |\n | Labels    | docs |\n | Milestone | — |\n\n A request to review the onboarding doc for accuracy. Low urgency.\n\n *Why you're seeing this:* Repo activity\n",
+  "notifications": []
+}

@@ -1,0 +1,46 @@
+#+TITLE: GitHub Inbox
+#+DATE: 2026-07-30 09:00
+
+* Roll back the cache TTL change :high:
+  :PROPERTIES:
+  :URL:  https://github.com/acme/widgets/issues/88
+  :HOST: github.com
+  :LAST_SEEN: 2026-07-30T08:45:00Z
+  :NOTES:
+  :END:
+  https://github.com/acme/widgets/issues/88
+
+  | Field     | Value |
+  |-----------+-------|
+  | State     | open |
+  | Author    | sre-oncall |
+  | Assignees | octdeveloper |
+  | Labels    | incident |
+  | Milestone | — |
+
+  You have been assigned to roll back a cache TTL change that is causing cache stampedes in production. It is labelled incident and sre-oncall is asking for an immediate rollback.
+
+  *Why you're seeing this:* Assigned to you
+
+  *Latest activity:* sre-oncall asked whether you can roll this back now, citing stampedes.
+
+* Investigate flaky integration test :medium:
+ :PROPERTIES:
+ :URL:  https://github.com/acme/widgets/issues/77
+ :HOST: github.com
+ :LAST_SEEN: 2026-07-28T09:00:00Z
+ :NOTES: waiting on a repro from QA
+ :END:
+ https://github.com/acme/widgets/issues/77
+
+ | Field     | Value |
+ |-----------+-------|
+ | State     | open |
+ | Author    | qa-lead |
+ | Assignees | octdeveloper |
+ | Labels    | flaky, test |
+ | Milestone | — |
+
+ The integration suite intermittently fails on the ordering assertion. You are assigned and waiting on a reliable repro.
+
+ *Why you're seeing this:* Assigned to you

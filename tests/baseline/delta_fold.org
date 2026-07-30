@@ -1,0 +1,29 @@
+#+TITLE: GitHub Inbox
+#+DATE: 2026-07-30 09:00
+
+* Add rate limiting to the public API :high:
+ :PROPERTIES:
+ :URL:  https://github.com/acme/widgets/pull/150
+ :HOST: github.com
+ :LAST_SEEN: 2026-07-30T08:15:00Z
+ :NOTES: ping me after CI is green
+ :END:
+ https://github.com/acme/widgets/pull/150
+
+ | Field       | Value |
+ |-------------+-------|
+ | State       | open |
+ | Author      | octdeveloper |
+ | Assignees   | — |
+ | Reviewers   | reviewer-x |
+ | Approved by | — |
+ | Reviewed by | — |
+ | Merge queue | — |
+ | Labels      | api |
+ | Milestone   | v2 |
+
+ Your PR adds token-bucket rate limiting to the public API. It is open and awaiting review from reviewer-x.
+
+ *Why you're seeing this:* Activity on your PR/issue
+
+  *Update 2026-07-30 09:00:* reviewer-x requested changes, asking you to add a test for the burst case before the rate limiter can be approved.

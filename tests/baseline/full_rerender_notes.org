@@ -1,0 +1,23 @@
+#+TITLE: GitHub Inbox
+#+DATE: 2026-07-30 09:00
+
+* Support custom TLS certificates :medium:
+  :PROPERTIES:
+  :URL:  https://github.com/acme/widgets/issues/64
+  :HOST: github.com
+  :LAST_SEEN: 2026-07-30T08:05:00Z
+  :NOTES: my design notes: prefer PEM over PKCS12
+  :END:
+  https://github.com/acme/widgets/issues/64
+
+  | Field     | Value |
+  |-----------+-------|
+  | State     | open |
+  | Author    | octdeveloper |
+  | Assignees | — |
+  | Labels    | feature |
+  | Milestone | — |
+
+  This issue tracks letting operators supply custom TLS certificates for the ingest endpoint. It is your open feature request. There is no new activity since you last looked.
+
+  *Why you're seeing this:* Activity on your PR/issue

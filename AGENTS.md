@@ -24,10 +24,24 @@ uv run python -m ghn "update my notifications" # run (full update, no filter)
 uv run python -m ghn "only PRs"               # filtered runs: "only PRs" / "only issues" / "review requests"
 ghn                                           # after `uv tool install .`
 uv run python -c "from ghn import run_pipeline; print('ok')"  # smoke-test the import
+uv run python -m ghn eval                     # offline eval: real pipeline vs checked-in goldens
+uv run python -m ghn eval --update            # regenerate goldens after an intentional output change
 ```
 
-There is **no test suite** in this repo (the `.pytest_cache` is stale/empty) and no lint
-config. Verify changes by running the pipeline.
+## Eval harness (`ghn eval`)
+
+`ghn/eval.py` + `tests/{fixtures,baseline}/` are an offline regression check (plan item 2.16).
+Each `tests/fixtures/*.json` scenario supplies canned GitHub data and model prose; the harness
+stubs the network (`ghn.tools`) and the model (`start_session` + the two classify slots), then
+runs the **real** `run_pipeline` against a temp inbox and diffs the written Org doc against
+`tests/baseline/<scenario>.org`. What runs for real is the whole deterministic core: priority
+decision (involvement beats the draft demotion, closed/merged forced low), flat-list ordering,
+fold/dedup, `flatten_prose` sanitisation, the metadata table, backup, and mark-Done. Only model
+prose and the fuzzy bucket call are canned, so this locks machinery, not model quality — run it
+before any prose-prompt or ordering change. Goldens capture *current* behaviour, including
+known-open bugs (e.g. B6 stale delta metadata); a fix intentionally changes a golden via
+`--update`. No network, no model, no new deps (stdlib `unittest.mock`); the `tests/` tree is not
+shipped in the wheel.
 
 ## Prerequisites at runtime
 

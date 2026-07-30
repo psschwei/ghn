@@ -1,0 +1,127 @@
+#+TITLE: GitHub Inbox
+#+DATE: 2026-07-30 09:00
+
+* Wire retry budget into the scheduler :high:
+  :PROPERTIES:
+  :URL:  https://github.com/acme/widgets/issues/101
+  :HOST: github.com
+  :LAST_SEEN: 2026-07-30T08:40:00Z
+  :NOTES:
+  :END:
+  https://github.com/acme/widgets/issues/101
+
+  | Field     | Value |
+  |-----------+-------|
+  | State     | open |
+  | Author    | prodlead |
+  | Assignees | octdeveloper |
+  | Labels    | backend |
+  | Milestone | v2 |
+
+  You have been assigned to add a retry budget to the scheduler, which currently drops jobs under load. It is open against the v2 milestone with a backend label. prodlead is asking whether you can land it before the v2 cut.
+
+  *Why you're seeing this:* Assigned to you
+
+  *Latest activity:* prodlead asked whether you can take this before the v2 cut.
+
+* Add structured logging to the ingest worker :high:
+  :PROPERTIES:
+  :URL:  https://github.com/acme/widgets/pull/210
+  :HOST: github.com
+  :LAST_SEEN: 2026-07-30T08:20:00Z
+  :NOTES:
+  :END:
+  https://github.com/acme/widgets/pull/210
+
+  | Field       | Value |
+  |-------------+-------|
+  | State       | open |
+  | Author      | contributor-a |
+  | Assignees   | — |
+  | Reviewers   | octdeveloper |
+  | Approved by | — |
+  | Reviewed by | — |
+  | Merge queue | — |
+  | Labels      | observability |
+  | Milestone   | — |
+
+  This PR adds structured JSON logging to the ingest worker and is open with a clean mergeable state. You are a requested reviewer and have not yet reviewed it. There is one comment and no reviews so far.
+
+  *Why you're seeing this:* Review requested
+
+* Spike: pluggable storage backends :low:
+  :PROPERTIES:
+  :URL:  https://github.com/acme/widgets/pull/230
+  :HOST: github.com
+  :LAST_SEEN: 2026-07-30T07:55:00Z
+  :NOTES:
+  :END:
+  https://github.com/acme/widgets/pull/230
+
+  | Field       | Value |
+  |-------------+-------|
+  | State       | draft |
+  | Author      | contributor-b |
+  | Assignees   | — |
+  | Reviewers   | — |
+  | Approved by | — |
+  | Reviewed by | — |
+  | Merge queue | — |
+  | Labels      | design |
+  | Milestone   | — |
+
+  This is a draft PR exploring a pluggable storage backend interface, not yet ready to merge. contributor-b has @-mentioned you with a design question about whether the interface must cover streaming writes. It carries a design label and has some review comments already.
+
+  *Why you're seeing this:* You were mentioned
+
+  *Latest activity:* contributor-b asked whether the interface needs to cover streaming writes or if batch is enough for now.
+
+* Fix off-by-one in pagination cursor :low:
+  :PROPERTIES:
+  :URL:  https://github.com/acme/widgets/pull/198
+  :HOST: github.com
+  :LAST_SEEN: 2026-07-30T06:30:00Z
+  :NOTES:
+  :END:
+  https://github.com/acme/widgets/pull/198
+
+  | Field       | Value |
+  |-------------+-------|
+  | State       | merged |
+  | Author      | octdeveloper |
+  | Assignees   | — |
+  | Reviewers   | — |
+  | Approved by | senior-eng |
+  | Reviewed by | — |
+  | Merge queue | — |
+  | Labels      | bug |
+  | Milestone   | v2 |
+
+  Your PR fixing an off-by-one in the pagination cursor has been merged into the v2 milestone. It was approved by senior-eng. No further action is needed.
+
+  *Why you're seeing this:* Activity on your PR/issue
+
+* Bump actions/checkout to v5 :low:
+  :PROPERTIES:
+  :URL:  https://github.com/acme/widgets/pull/241
+  :HOST: github.com
+  :LAST_SEEN: 2026-07-30T05:00:00Z
+  :NOTES:
+  :END:
+  https://github.com/acme/widgets/pull/241
+
+  | Field       | Value |
+  |-------------+-------|
+  | State       | open |
+  | Author      | dependabot[bot] |
+  | Assignees   | — |
+  | Reviewers   | — |
+  | Approved by | — |
+  | Reviewed by | — |
+  | Merge queue | Auto-merge enabled (by octmaintainer) |
+  | Labels      | dependencies |
+  | Milestone   | — |
+
+  A Dependabot PR bumping actions/checkout from v4 to v5, with auto-merge armed by octmaintainer. It is routine repo activity you are subscribed to and needs no action from you.
+
+  *Why you're seeing this:* Repo activity

@@ -1,0 +1,29 @@
+#+TITLE: GitHub Inbox
+#+DATE: 2026-07-30 09:00
+
+* Refactor the config loader :high:
+  :PROPERTIES:
+  :URL:  https://github.com/acme/widgets/pull/300
+  :HOST: github.com
+  :LAST_SEEN: 2026-07-30T08:00:00Z
+  :NOTES:
+  :END:
+  https://github.com/acme/widgets/pull/300
+
+  | Field       | Value |
+  |-------------+-------|
+  | State       | open |
+  | Author      | contributor-c |
+  | Assignees   | — |
+  | Reviewers   | octdeveloper |
+  | Approved by | — |
+  | Reviewed by | — |
+  | Merge queue | — |
+  | Labels      | refactor |
+  | Milestone   | — |
+
+  This PR does three things: Splits the loader into layers. Adds *env-var* precedence. It also removes the legacy dotenv path. The change is open and awaiting your review.
+
+  *Why you're seeing this:* Review requested
+
+  *Latest activity:* contributor-c pushed a *force-update* rebasing onto main.

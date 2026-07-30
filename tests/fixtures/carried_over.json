@@ -1,0 +1,43 @@
+{
+  "now": "2026-07-30 09:00",
+  "filter_mode": "all",
+  "logins": { "github.com": "octdeveloper" },
+  "existing_inbox": "#+TITLE: GitHub Inbox\n#+DATE: 2026-07-28 09:00\n\n* Investigate flaky integration test :medium:\n :PROPERTIES:\n :URL:  https://github.com/acme/widgets/issues/77\n :HOST: github.com\n :LAST_SEEN: 2026-07-28T09:00:00Z\n :NOTES: waiting on a repro from QA\n :END:\n https://github.com/acme/widgets/issues/77\n\n | Field     | Value |\n |-----------+-------|\n | State     | open |\n | Author    | qa-lead |\n | Assignees | octdeveloper |\n | Labels    | flaky, test |\n | Milestone | — |\n\n The integration suite intermittently fails on the ordering assertion. You are assigned and waiting on a reliable repro.\n\n *Why you're seeing this:* Assigned to you\n",
+  "notifications": [
+    {
+      "host": "github.com",
+      "raw": {
+        "id": "t-new-assign",
+        "reason": "assign",
+        "updated_at": "2026-07-30T08:45:00Z",
+        "subject": {
+          "title": "Roll back the cache TTL change",
+          "type": "Issue",
+          "url": "repos/acme/widgets/issues/88",
+          "latest_comment_url": "repos/acme/widgets/issues/comments/9300"
+        },
+        "repository": { "full_name": "acme/widgets" }
+      },
+      "enrich": {
+        "html_url": "https://github.com/acme/widgets/issues/88",
+        "state": "open",
+        "user": "sre-oncall",
+        "assignees": ["octdeveloper"],
+        "labels": ["incident"],
+        "milestone": null,
+        "comments": 5,
+        "body": "The cache TTL change is causing stampedes in prod. Assigning to you to roll it back.",
+        "created_at": "2026-07-30T08:00:00Z"
+      },
+      "latest_comment": {
+        "author": "sre-oncall",
+        "body": "Can you roll this back now? We are seeing stampedes.",
+        "created_at": "2026-07-30T08:45:00Z"
+      },
+      "prose": {
+        "summary": "You have been assigned to roll back a cache TTL change that is causing cache stampedes in production. It is labelled incident and sre-oncall is asking for an immediate rollback.",
+        "latest_activity": "sre-oncall asked whether you can roll this back now, citing stampedes."
+      }
+    }
+  ]
+}

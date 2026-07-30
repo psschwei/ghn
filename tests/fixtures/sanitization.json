@@ -1,0 +1,45 @@
+{
+  "now": "2026-07-30 09:00",
+  "filter_mode": "all",
+  "logins": { "github.com": "octdeveloper" },
+  "notifications": [
+    {
+      "host": "github.com",
+      "raw": {
+        "id": "t-leaky-prose",
+        "reason": "review_requested",
+        "updated_at": "2026-07-30T08:00:00Z",
+        "subject": {
+          "title": "Refactor the config loader",
+          "type": "PullRequest",
+          "url": "repos/acme/widgets/pulls/300",
+          "latest_comment_url": ""
+        },
+        "repository": { "full_name": "acme/widgets" }
+      },
+      "enrich": {
+        "html_url": "https://github.com/acme/widgets/pull/300",
+        "state": "open",
+        "merged": false,
+        "draft": false,
+        "user": "contributor-c",
+        "requested_reviewers": ["octdeveloper"],
+        "assignees": [],
+        "labels": ["refactor"],
+        "milestone": null,
+        "review_comments": 0,
+        "comments": 0,
+        "mergeable_state": "clean",
+        "auto_merge": false,
+        "auto_merge_enabled_by": null,
+        "body": "## Description\nSplits the config loader into resolution layers.",
+        "created_at": "2026-07-29T18:00:00Z"
+      },
+      "review_state": { "own": "none", "others": "none" },
+      "prose": {
+        "summary": "This PR does three things:\n1. Splits the loader into layers.\n2. Adds **env-var** precedence.\n* It also removes the legacy dotenv path.\nThe change is open and awaiting your review.",
+        "latest_activity": "- contributor-c pushed a **force-update** rebasing onto main."
+      }
+    }
+  ]
+}

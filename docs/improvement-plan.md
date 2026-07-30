@@ -124,7 +124,7 @@ blocks 1.10), **B10** (`_gh` method allowlist).
 | 2.13 | Add high-value unused signals, all GET-only: CI check-runs, `requested_teams`, diff size, age/staleness, last-commenter. | `_PR_JQ` omits `requested_teams` entirely — mellea review requests arrive via a CODEOWNERS *team*, which is why only one item is ever `:high:`. Highest-leverage single item here. |
 | 2.14 | Two-pass render with an `* Overview` section at the top. | Counts and high-priority titles are already computed at `pipeline.py:802-828` and sent to stdout instead of the doc. |
 | 2.15 | Parallelize enrichment. | Currently 28 items × 3-7 blocking subprocess calls, fully serial. |
-| 2.16 | **Eval harness** — ~15 committed notification fixtures plus a `ghn eval` command diffing against a checked-in baseline. | Arguably belongs *before* 1.9 and 2.11: there is no test suite, so every prompt change is currently unverifiable. |
+| 2.16 | **Eval harness** — DONE. `ghn eval` runs the real `run_pipeline` with the network (`ghn.tools`) and model (`start_session` + both classify slots) stubbed from `tests/fixtures/*.json`, diffing the written doc against `tests/baseline/*.org`. 6 scenarios (priority matrix, sanitization, delta-fold, carried-over, empty-delta, full-rerender-notes). `--update` regenerates goldens. Stdlib only. | The deterministic core runs for real — ordering, fold/dedup, `flatten_prose`, backup, mark-Done, and the Tier-0.5 priority decision — so 2.11's scorer will be exercised live once it lands. Goldens capture current behaviour incl. known bugs (B6). |
 
 ## Tier 3 — move judgment into Claude
 
