@@ -29,6 +29,9 @@ _HEADING_RE = re.compile(r"^(\*+)\s+(.*)$")
 _PRIORITY_TAG_RE = re.compile(r":(high|medium|low):")
 # The doc-level ``#+DATE: 2026-06-16 18:01`` header (matches current_timestamp format).
 _DOC_DATE_RE = re.compile(r"^\s*#\+DATE:\s*(.+?)\s*$", re.IGNORECASE)
+# The ``| State | <value> |`` row of an item's metadata table (render_item_subtree writes it
+# first). ``clean`` reads the value to decide whether an item is finished (merged/closed/draft).
+_STATE_ROW_RE = re.compile(r"^\s*\|\s*State\s*\|\s*(.+?)\s*\|", re.MULTILINE)
 
 
 def read_existing_inbox(inbox_path: str | Path) -> dict[str, dict[str, Any]]:
@@ -112,6 +115,70 @@ def read_existing_inbox(inbox_path: str | Path) -> dict[str, dict[str, Any]]:
             # nested headings that ARE items still get their own turn.
             i = start + 1
     return items
+
+
+def strip_finished_items(
+    text: str, remove_states: frozenset[str]
+) -> tuple[str, list[tuple[str, str, str]]]:
+    """Drop item subtrees whose recorded ``State`` is a finished state (``ghn clean``).
+
+    Walks ``text`` the same way ``read_existing_inbox`` does — an item is any org heading whose
+    own :PROPERTIES: drawer carries a :URL: — and reads each item's ``| State | <value> |``
+    metadata row (``_STATE_ROW_RE``). When that value (lower-cased) is in ``remove_states``
+    (e.g. ``{"merged", "closed", "draft"}``), the whole item subtree is dropped, including its
+    trailing blank lines, so the kept items stay correctly separated. Every other line — the
+    doc header (``#+TITLE:`` / ``#+DATE:``, deliberately left intact), URL-less container
+    headings, kept items, and any hand-added prose — is emitted verbatim. This is a
+    line-level verbatim filter, not a re-render, so curated text (including :NOTES:) is
+    preserved byte-for-byte.
+
+    An item with no ``State`` row is kept (conservative — we only remove what we can positively
+    identify as finished).
+
+    Returns ``(new_text, removed)`` where each ``removed`` entry is ``(heading, url, state)``.
+    ``new_text`` follows ``render_inbox_org``'s convention (a single trailing newline). When
+    nothing is removed, ``new_text`` is the input normalised to that same convention and
+    ``removed`` is empty.
+    """
+    lines = text.splitlines()
+    out: list[str] = []
+    removed: list[tuple[str, str, str]] = []
+    n = len(lines)
+    i = 0
+    while i < n:
+        m = _HEADING_RE.match(lines[i])
+        if not m:
+            out.append(lines[i])
+            i += 1
+            continue
+        depth = len(m.group(1))
+        start = i
+        j = i + 1
+        # Extend the subtree until the next heading of same-or-shallower depth (mirrors
+        # read_existing_inbox's span logic).
+        while j < n:
+            mh = _HEADING_RE.match(lines[j])
+            if mh and len(mh.group(1)) <= depth:
+                break
+            j += 1
+        block_lines = lines[start:j]
+        own_drawer = _own_drawer_lines(block_lines)
+        url = _extract_prop(own_drawer, "URL")
+        if url:
+            sm = _STATE_ROW_RE.search("\n".join(block_lines))
+            state = sm.group(1).strip().lower() if sm else None
+            if state in remove_states:
+                removed.append((block_lines[0].strip(), url, state))
+                i = j  # drop the whole subtree (including its trailing blank lines)
+                continue
+            out.extend(block_lines)
+            i = j
+        else:
+            # Not an item (no :URL: in its own drawer) — emit just this heading line and let any
+            # nested headings that ARE items get their own turn.
+            out.append(lines[start])
+            i = start + 1
+    return "\n".join(out).rstrip() + "\n", removed
 
 
 def read_doc_date(inbox_path: str | Path) -> str | None:

@@ -23,6 +23,7 @@ uv sync                                       # install deps into .venv
 uv run python -m ghn "update my notifications" # run (full update, no filter)
 uv run python -m ghn "only PRs"               # filtered runs: "only PRs" / "only issues" / "review requests"
 ghn                                           # after `uv tool install .`
+uv run python -m ghn clean                    # prune merged/closed/draft items from the inbox doc (offline)
 uv run python -c "from ghn import run_pipeline; print('ok')"  # smoke-test the import
 uv run python -m ghn eval                     # offline eval: real pipeline vs checked-in goldens
 uv run python -m ghn eval --update            # regenerate goldens after an intentional output change
@@ -111,6 +112,12 @@ conventions:
   on; wired in `main.py`, not the pipeline.
 - **`main.py`** — CLI entry point (`ghn` script). Parses the natural-language request,
   optionally wraps the run in `spawned_llama_server()`, runs the pipeline, prints the summary.
+  Dispatches the `eval` and `clean` dev subcommands before argparse so their flags don't collide
+  with the free-form request.
+- **`clean.py`** — the `ghn clean` subcommand: prune merged/closed/draft items from the inbox
+  doc. Offline (no fetch, no model) — it reads each item's recorded `State` metadata row via
+  `loader.strip_finished_items`, backs the doc up (`pipeline.backup_inbox`), rewrites it, and
+  reports removals. `run_pipeline` is untouched.
 
 ### Key invariants
 

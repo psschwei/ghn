@@ -42,6 +42,14 @@ def main(argv: list[str] | None = None) -> int:
 
         return run_eval(argv[1:])
 
+    # `ghn clean` is likewise a subcommand, not a request: it prunes merged/closed/draft items
+    # from the inbox doc (offline, no fetch, no model). Dispatched before argparse so the
+    # free-form request parser is untouched.
+    if argv and argv[0] == "clean":
+        from .clean import run_clean
+
+        return run_clean(argv[1:])
+
     args = parser.parse_args(argv)
 
     user_request = " ".join(args.request).strip()

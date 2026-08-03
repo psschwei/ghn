@@ -32,6 +32,20 @@ The note is free text `ghn` never parses; it's preserved verbatim across every r
 including when the item is refreshed with new activity. It's a single line — clear it to
 remove the note.
 
+## Cleaning finished items
+
+Items stay in the inbox until you remove them, but finished ones pile up. `ghn clean`
+prunes every item whose recorded state is merged, closed, or a draft:
+
+```bash
+ghn clean
+```
+
+It reads the state straight from each item's metadata table (no network, no model), backs
+the doc up first (as `github.org.bak-<stamp>`, so a removal is recoverable), and prints
+what it removed. Because it reads the doc's own recorded state, an item that has since
+merged on GitHub is only cleaned once a later run refreshes it.
+
 ## Getting started
 
 GitHub access goes through the authenticated [`gh` CLI](https://cli.github.com/), so make
