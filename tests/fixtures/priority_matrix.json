@@ -34,8 +34,8 @@
         "created_at": "2026-07-30T08:40:00Z"
       },
       "prose": {
-        "summary": "You have been assigned to add a retry budget to the scheduler, which currently drops jobs under load. It is open against the v2 milestone with a backend label. prodlead is asking whether you can land it before the v2 cut.",
-        "latest_activity": "prodlead asked whether you can take this before the v2 cut."
+        "body_summary": "You have been assigned to add a retry budget to the scheduler, which currently drops jobs under load. It is open against the v2 milestone with a backend label. prodlead is asking whether you can land it before the v2 cut.",
+        "conversation_summary": "prodlead asked whether you can take this before the v2 cut."
       }
     },
     {
@@ -72,8 +72,8 @@
       },
       "review_state": { "own": "none", "others": "none" },
       "prose": {
-        "summary": "This PR adds structured JSON logging to the ingest worker and is open with a clean mergeable state. You are a requested reviewer and have not yet reviewed it. There is one comment and no reviews so far.",
-        "latest_activity": ""
+        "body_summary": "This PR adds structured JSON logging to the ingest worker and is open with a clean mergeable state. You are a requested reviewer and have not yet reviewed it. There is one comment and no reviews so far.",
+        "conversation_summary": ""
       }
     },
     {
@@ -114,8 +114,8 @@
         "created_at": "2026-07-30T07:55:00Z"
       },
       "prose": {
-        "summary": "This is a draft PR exploring a pluggable storage backend interface, not yet ready to merge. contributor-b has @-mentioned you with a design question about whether the interface must cover streaming writes. It carries a design label and has some review comments already.",
-        "latest_activity": "contributor-b asked whether the interface needs to cover streaming writes or if batch is enough for now."
+        "body_summary": "This is a draft PR exploring a pluggable storage backend interface, not yet ready to merge. contributor-b has @-mentioned you with a design question about whether the interface must cover streaming writes. It carries a design label and has some review comments already.",
+        "conversation_summary": "contributor-b asked whether the interface needs to cover streaming writes or if batch is enough for now."
       }
     },
     {
@@ -153,8 +153,8 @@
       "review_summary": { "approved_by": ["senior-eng"], "changes_requested_by": [], "commented_by": [] },
       "review_state": { "own": "none", "others": "APPROVED" },
       "prose": {
-        "summary": "Your PR fixing an off-by-one in the pagination cursor has been merged into the v2 milestone. It was approved by senior-eng. No further action is needed.",
-        "latest_activity": ""
+        "body_summary": "Your PR fixing an off-by-one in the pagination cursor has been merged into the v2 milestone. It was approved by senior-eng. No further action is needed.",
+        "conversation_summary": ""
       }
     },
     {
@@ -190,8 +190,8 @@
         "created_at": "2026-07-30T05:00:00Z"
       },
       "prose": {
-        "summary": "A Dependabot PR bumping actions/checkout from v4 to v5, with auto-merge armed by octmaintainer. It is routine repo activity you are subscribed to and needs no action from you.",
-        "latest_activity": ""
+        "body_summary": "A Dependabot PR bumping actions/checkout from v4 to v5, with auto-merge armed by octmaintainer. It is routine repo activity you are subscribed to and needs no action from you.",
+        "conversation_summary": ""
       }
     }
   ]

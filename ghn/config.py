@@ -149,14 +149,16 @@ CLASSIFIER_MODEL_ID: Final[str] = _cfg(
 LOOP_BUDGET: Final[int] = 3
 
 # Generation budget for per-item prose (Ollama num_predict). Without it the backend falls back
-# to its small default, which truncates summaries to a bare-bones sentence or two. Override with
-# GHN_ITEM_SUMMARY_MAX_TOKENS or the [model] item_summary_max_tokens key. int() accepts both a
-# TOML integer and a string env value.
+# to its small default, which truncates summaries to a bare-bones sentence or two. A full render
+# now produces TWO substantial fields — a body summary and a separate conversation summary drawn
+# from the whole comment/review thread — so the default is 2048 to give both room; bump it higher
+# for very long threads. Override with GHN_ITEM_SUMMARY_MAX_TOKENS or the [model]
+# item_summary_max_tokens key. int() accepts both a TOML integer and a string env value.
 #
 # There is no run-summary budget: the end-of-run summary is assembled deterministically from the
 # run's counts (pipeline._summary_headline), not generated, so it has no token cost.
 ITEM_SUMMARY_MAX_TOKENS: Final[int] = int(
-    _cfg('GHN_ITEM_SUMMARY_MAX_TOKENS', 'model', 'item_summary_max_tokens', 1024)
+    _cfg('GHN_ITEM_SUMMARY_MAX_TOKENS', 'model', 'item_summary_max_tokens', 2048)
 )
 
 # === Self-hosted llama.cpp (spawn-per-run) ===

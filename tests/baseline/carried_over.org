@@ -18,11 +18,12 @@
   | Labels    | incident |
   | Milestone | — |
 
-  You have been assigned to roll back a cache TTL change that is causing cache stampedes in production. It is labelled incident and sre-oncall is asking for an immediate rollback.
+  You have been assigned to roll back a cache TTL change that is causing cache stampedes in
+  production. It is labelled incident and sre-oncall is asking for an immediate rollback.
 
   *Why you're seeing this:* Assigned to you
 
-  *Latest activity:* sre-oncall asked whether you can roll this back now, citing stampedes.
+  *Conversation:* sre-oncall asked whether you can roll this back now, citing stampedes.
 
 * Investigate flaky integration test :medium:
  :PROPERTIES:

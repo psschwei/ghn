@@ -32,8 +32,8 @@
       "new_comments": [],
       "new_reviews": [],
       "prose": {
-        "summary": "This issue tracks letting operators supply custom TLS certificates for the ingest endpoint. It is your open feature request. There is no new activity since you last looked.",
-        "latest_activity": ""
+        "body_summary": "This issue tracks letting operators supply custom TLS certificates for the ingest endpoint. It is your open feature request. There is no new activity since you last looked.",
+        "conversation_summary": ""
       }
     }
   ]

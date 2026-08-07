@@ -18,6 +18,7 @@
   | Labels    | feature |
   | Milestone | — |
 
-  This issue tracks letting operators supply custom TLS certificates for the ingest endpoint. It is your open feature request. There is no new activity since you last looked.
+  This issue tracks letting operators supply custom TLS certificates for the ingest endpoint. It is
+  your open feature request. There is no new activity since you last looked.
 
   *Why you're seeing this:* Activity on your PR/issue

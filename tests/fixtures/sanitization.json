@@ -37,8 +37,8 @@
       },
       "review_state": { "own": "none", "others": "none" },
       "prose": {
-        "summary": "This PR does three things:\n1. Splits the loader into layers.\n2. Adds **env-var** precedence.\n* It also removes the legacy dotenv path.\nThe change is open and awaiting your review.",
-        "latest_activity": "- contributor-c pushed a **force-update** rebasing onto main."
+        "body_summary": "This PR does three things:\n1. Splits the loader into layers.\n2. Adds **env-var** precedence.\n* It also removes the legacy dotenv path.\nThe change is open and awaiting your review.",
+        "conversation_summary": "- contributor-c pushed a **force-update** rebasing onto main."
       }
     }
   ]

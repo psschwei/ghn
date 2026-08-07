@@ -292,16 +292,22 @@ def _issue_comments_url(subject_url: str) -> str:
     return f"{base}/comments"
 
 
-def fetch_new_comments(subject_url: str, host: str, *, since: str) -> list[dict[str, Any]]:
-    """Fetch conversation comments created after ``since`` (ISO-8601 UTC) (new-activity delta).
+def fetch_new_comments(
+    subject_url: str, host: str, *, since: str | None = None
+) -> list[dict[str, Any]]:
+    """Fetch conversation comments, optionally only those created after ``since``.
 
-    Uses the ``?since=`` query param so the date filtering happens server-side. Works for
-    both PRs and Issues (PR conversation comments live on the issues endpoint). Returns
-    ``[{author, body, created_at}]`` ordered oldest-first, or ``[]`` on error / no subject.
+    With ``since`` set (ISO-8601 UTC), uses the ``?since=`` query param so the date filtering
+    happens server-side — the new-activity delta for a known item. With ``since`` ``None`` (or
+    empty), fetches the whole comment history — used to build the full-thread conversation
+    summary for a freshly-rendered item. Works for both PRs and Issues (PR conversation
+    comments live on the issues endpoint). Returns ``[{author, body, created_at}]`` ordered
+    oldest-first, or ``[]`` on error / no subject.
     """
-    if not subject_url or not since:
+    if not subject_url:
         return []
-    url = f"{_issue_comments_url(subject_url)}?since={since}"
+    base = _issue_comments_url(subject_url)
+    url = f"{base}?since={since}" if since else base
     jq = "[.[] | {author: .user.login, body: .body, created_at: .created_at}]"
     try:
         result = _gh_json(["api", url, "--paginate", "--jq", jq], host=host)
@@ -310,17 +316,22 @@ def fetch_new_comments(subject_url: str, host: str, *, since: str) -> list[dict[
     return result if isinstance(result, list) else []
 
 
-def fetch_new_reviews(subject_url: str, host: str, *, since: str) -> list[dict[str, Any]]:
-    """Fetch PR reviews submitted after ``since`` (ISO-8601 UTC) (new-activity delta).
+def fetch_new_reviews(
+    subject_url: str, host: str, *, since: str | None = None
+) -> list[dict[str, Any]]:
+    """Fetch PR reviews, optionally only those submitted after ``since`` (ISO-8601 UTC).
 
-    The reviews endpoint has no ``since`` param, so we project each review and filter by
-    ``submitted_at`` in jq. Returns ``[{author, state, submitted_at, body}]`` ordered
+    The reviews endpoint has no ``since`` param, so we project each review and, when ``since``
+    is set, filter by ``submitted_at`` in jq (the new-activity delta). With ``since`` ``None``
+    (or empty) every review is returned — the full review history for a freshly-rendered
+    item's conversation summary. Returns ``[{author, state, submitted_at, body}]`` ordered
     oldest-first, or ``[]`` on error / no subject. Issues have no reviews -> ``[]``.
     """
-    if not subject_url or not since:
+    if not subject_url:
         return []
+    guard = f'.submitted_at != null and .submitted_at > "{since}"' if since else "true"
     jq = (
-        f'[.[] | select(.submitted_at != null and .submitted_at > "{since}") '
+        f"[.[] | select({guard}) "
         "| {author: .user.login, state: .state, submitted_at: .submitted_at, body: .body}]"
     )
     try:

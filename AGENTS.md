@@ -166,12 +166,23 @@ conventions:
   is where colleagues @-mention or assign you, and demoting first buried exactly those items. We
   key off `requested_reviewers`, not `reason`, because GitHub flips `review_requested` to
   `comment` once the user comments.
-- **Model prose is flattened before it enters the doc (`flatten_prose`).** A column-0 `*` in
-  model output is an Org heading, and `loader` ends the item's subtree there — silently
-  destroying appended `*Update` history and any user prose below. The models do emit column-0
-  list markup despite the prompts, so this is enforced structurally, never by instruction alone.
-  `_compact_inline_updates` heals blocks written before this existed. **Assignees are shown for
-  both issues and PRs**; Reviewers / Approved by / Reviewed by / Merge queue rows are PR-only.
+- **Model prose is flattened, then soft-wrapped, before it enters the doc (`flatten_prose` →
+  `_wrap_prose`).** A column-0 `*` in model output is an Org heading, and `loader` ends the
+  item's subtree there — silently destroying appended `*Update` history and any user prose
+  below. The models do emit column-0 list markup despite the prompts, so this is enforced
+  structurally, never by instruction alone. `flatten_prose` collapses the prose to one safe
+  logical line (no column-0 hazard, markdown emphasis rewritten); `_wrap_prose` then wraps it
+  to `WRAP_WIDTH` (100) columns with every line — including the first — carrying the item's
+  indent, so continuation lines stay inside the subtree and never read as a heading next run.
+  `_compact_inline_updates` heals blocks written before this existed and re-wraps them.
+  **Assignees are shown for both issues and PRs**; Reviewers / Approved by / Reviewed by /
+  Merge queue rows are PR-only.
+- **Each full-rendered item carries two generated summaries (`ItemRender`).** `body_summary`
+  is what the item is about (from its template-stripped description); `conversation_summary`
+  is the discussion across the whole comment/review thread (fetched via
+  `fetch_new_comments`/`fetch_new_reviews` with `since=None`), omitted entirely when there is
+  no thread. Delta-mode items (known + new activity) instead get an `ActivityDelta` covering
+  only what changed, so they don't fetch the full thread.
 - **The doc is backed up before every write** (`backup_inbox`, keeping the newest 10 as
   `github.org.bak-<stamp>`). The overwrite is wholesale and the doc is the only record of the
   inbox, so a bad fold would otherwise be unrecoverable. Best-effort: it never raises, so it

@@ -25,6 +25,7 @@ read. That guarantee is structural, not prompt-dependent.
 from __future__ import annotations
 
 import re
+import textwrap
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -224,6 +225,45 @@ def flatten_prose(text: str) -> str:
     return out
 
 
+# Soft wrap width for generated prose. Lines that run to the edge of a wide terminal are hard
+# to read, so prose is wrapped to roughly this many columns (indent included). Structural lines
+# (the raw URL, the metadata table) are never wrapped — they can't break without corrupting the
+# Org round-trip — only prose passes through _wrap_prose.
+WRAP_WIDTH: int = 100
+
+
+def _wrap_prose(
+    text: str, indent: str, *, prefix: str = "", width: int = WRAP_WIDTH
+) -> list[str]:
+    """Flatten model prose to one logical line, then soft-wrap it to ``width`` columns.
+
+    ``flatten_prose`` runs first, so wrapping only ever splits an already-safe single logical
+    line: newlines/bullets are collapsed and ``**bold**`` rewritten before any wrapping, which
+    means no wrapped line can begin with a column-0 ``*`` heading hazard. ``prefix`` (e.g.
+    ``"*Conversation:* "``) is prepended to the flattened text before wrapping so an inline
+    label wraps together with its prose. Every emitted line — including the first — carries
+    ``indent`` (the item's ``level + 1`` spaces), so continuation lines stay inside the item
+    subtree and never read as an Org heading on the next parse.
+
+    Long unbreakable tokens (URLs, code identifiers) overflow the width rather than being split
+    (``break_long_words``/``break_on_hyphens`` off) — a split URL is worse than a long line.
+    Returns ``[]`` when the prose is empty after flattening (even with a ``prefix``), so a
+    caller can omit a labelled block entirely rather than emit a bare dangling label.
+    """
+    flat = flatten_prose(text)
+    if not flat:
+        return []
+    body = f"{prefix}{flat}" if prefix else flat
+    wrapper = textwrap.TextWrapper(
+        width=width,
+        initial_indent=indent,
+        subsequent_indent=indent,
+        break_long_words=False,
+        break_on_hyphens=False,
+    )
+    return wrapper.wrap(body)
+
+
 def _host_for(notif: dict[str, Any]) -> str:
     """Return the GitHub host a notification belongs to."""
     return notif.get("host", GITHUB_COM_HOST)
@@ -353,6 +393,26 @@ def _enrich(
         if subject_type == "PullRequest":
             new_reviews = tools.fetch_new_reviews(subject_url, host, since=cutoff)
 
+    # Full conversation thread for items that will take the full-render path (brand-new, or
+    # known but with no new activity since the cutoff — see pipeline._is_delta_mode). The
+    # render prompt turns this into the conversation_summary. Delta-mode items (known + new
+    # activity) summarise only what changed, so they don't need — and don't pay for — the whole
+    # thread. Gated by the same should_fetch_comment check used for latest_comment, so
+    # low-priority noise (subscribed / ci_activity / …) still skips the fetch and its
+    # conversation summary comes back empty.
+    all_comments: list[dict[str, Any]] = []
+    all_reviews: list[dict[str, Any]] = []
+    will_full_render = is_new or not (new_comments or new_reviews)
+    if (
+        will_full_render
+        and should_fetch_comment
+        and subject_url
+        and not enriched.get("inaccessible")
+    ):
+        all_comments = tools.fetch_new_comments(subject_url, host)
+        if subject_type == "PullRequest":
+            all_reviews = tools.fetch_new_reviews(subject_url, host)
+
     return {
         **notif,
         "enriched": enriched,
@@ -367,6 +427,8 @@ def _enrich(
         "cutoff": cutoff,
         "new_comments": new_comments,
         "new_reviews": new_reviews,
+        "all_comments": all_comments,
+        "all_reviews": all_reviews,
         # Any typed :NOTES: property value from the prior block (None for new items);
         # re-emitted verbatim by render_item_subtree so a note survives a full re-render.
         "notes": (prior or {}).get("notes"),
@@ -384,15 +446,19 @@ def render_item_subtree(item: dict[str, Any], render: ItemRender, level: int) ->
     user-owned free text re-emitted verbatim so a typed note survives this full re-render),
     the raw html_url on its own line (for C-c C-o / link-open access), a metadata table
     (Assignees shown for both; the Reviewers/Approved/Reviewed/Merge-queue rows are
-    PR-only), the generated summary, the "Why you're seeing this" line, and the "Latest
-    activity" line.
+    PR-only), the body summary (what the item is about), the "Why you're seeing this" line,
+    and the "Conversation" summary (what people have been saying).
 
     "Why you're seeing this" is looked up from ``REASON_DISPLAY`` here rather than generated:
     it is a pure function of the notification's ``reason``, so asking a model to phrase it only
-    invited drift (it sometimes returned a whole sentence about "the user"). "Latest activity"
-    is omitted entirely when the model had no comment to describe — ``ItemRender`` requires the
-    field, so with no source data it comes back empty or invented; an absent line is honest,
-    an empty one is not.
+    invited drift (it sometimes returned a whole sentence about "the user"). The Conversation
+    summary is omitted entirely when the model had no comments/reviews to describe —
+    ``ItemRender`` requires the field, so with no source data it comes back empty or invented;
+    an absent line is honest, an empty one is not.
+
+    All generated prose is wrapped to ``WRAP_WIDTH`` columns via ``_wrap_prose`` (which runs
+    ``flatten_prose`` first), so long summaries read as an indented paragraph rather than one
+    line running off the screen; the indent keeps every wrapped line inside the item subtree.
     """
     stars = "*" * level
     indent = " " * (level + 1)
@@ -461,15 +527,21 @@ def render_item_subtree(item: dict[str, Any], render: ItemRender, level: int) ->
         lines.append(f"{indent}| {key}{' ' * (width - len(key))} | {val} |")
     lines.append("")
 
-    # Every model-generated line is flattened before it enters the document — a column-0 ``*``
-    # would otherwise be read as an Org heading next run and truncate the item (flatten_prose).
-    lines.append(f"{indent}{flatten_prose(render.summary)}")
+    # Every model-generated line is flattened and soft-wrapped before it enters the document —
+    # a column-0 ``*`` would otherwise be read as an Org heading next run and truncate the item
+    # (flatten_prose, run inside _wrap_prose). Body summary: what the item is about.
+    lines.extend(_wrap_prose(render.body_summary, indent))
     lines.append("")
     lines.append(f"{indent}*Why you're seeing this:* {why_seeing}")
     lines.append("")
-    latest = flatten_prose(render.latest_activity)
-    if latest:
-        lines.append(f"{indent}*Latest activity:* {latest}")
+    # Conversation summary: what people have been saying. Omitted entirely when the model had
+    # no comments/reviews to describe (empty string) — an absent block is honest, an empty
+    # labelled one is not. The label wraps together with the prose (see _wrap_prose prefix).
+    conversation = _wrap_prose(
+        render.conversation_summary, indent, prefix="*Conversation:* "
+    )
+    if conversation:
+        lines.extend(conversation)
         lines.append("")
     return "\n".join(lines)
 
@@ -536,19 +608,18 @@ def _normalize_stale_update_headings(block: str, level: int) -> str:
     Older runs rendered the new-activity delta as a child org heading (``*** Update <ts>``
     followed by the indented prose). Updates must never be a subheading — they belong inline
     under the item, mirroring ``render_activity_delta``. This rewrites each such heading-block
-    into a single ``*Update <ts>:* <body>`` line at the item's indent (``level + 1`` spaces),
-    collapsing the indented body to one line. The inline form current runs already produce is
-    left untouched (it isn't an org heading, so it doesn't match).
+    into a soft-wrapped ``*Update <ts>:* <body>`` entry at the item's indent (``level + 1``
+    spaces), matching the wrapped inline form current runs produce. The inline form is left
+    untouched (it isn't an org heading, so it doesn't match).
     """
     indent = " " * (level + 1)
 
     def _inline(m: re.Match[str]) -> str:
         ts = m.group("ts").strip()
-        body = flatten_prose(m.group("body"))
-        line = f"{indent}*Update {ts}:*"
-        if body:
-            line += f" {body}"
-        return line + "\n"
+        wrapped = _wrap_prose(m.group("body"), indent, prefix=f"*Update {ts}:* ")
+        if not wrapped:
+            wrapped = [f"{indent}*Update {ts}:*"]
+        return "\n".join(wrapped) + "\n"
 
     return _STALE_UPDATE_HEADING_RE.sub(_inline, block)
 
@@ -560,23 +631,24 @@ _DRAWER_LINE_RE = re.compile(r"^[ \t]*:[A-Za-z_]+:")
 
 
 def _compact_inline_updates(block: str, level: int) -> str:
-    """Collapse each multi-line ``*Update ...:*`` entry in a carried block onto one line.
+    """Re-fold each multi-line ``*Update ...:*`` entry in a carried block to the wrapped form.
 
     Runs before ``flatten_prose`` existed interpolated model output verbatim, so the doc contains
     updates spanning many physical lines with markdown lists and ``**bold**`` at column 0. Those
     lines are a latent hazard — one of them starting with ``*`` is an Org heading, and would
-    truncate the item on the next read — and they render as literal markup. This folds each such
-    entry back to the single-line form current runs produce, so carried blocks converge on the
-    correct shape instead of keeping their defects forever.
+    truncate the item on the next read — and they render as literal markup. This gathers each
+    such entry's whole body and re-emits it through ``_wrap_prose`` (flatten + soft-wrap), so
+    carried blocks converge on the same wrapped shape current runs produce instead of keeping
+    their defects forever.
 
     An update's body runs until the next ``*Update`` line, a genuine sibling Org heading, or a
     drawer line. Both callers pass a single item's subtree so a sibling heading should not appear,
     but a fold that swallowed one would silently delete an item, so the boundary is enforced here
     rather than assumed. A column-0 ``* text`` bullet is body (it is what we are fixing); a
     heading is distinguished by carrying a priority tag or a ``:URL:`` drawer beneath it, which a
-    stray bullet never does.
-
-    Idempotent: an already-single-line update re-emits itself unchanged.
+    stray bullet never does. The continuation lines a previous wrapped run produced are plain
+    indented prose (none of the boundary markers), so they are absorbed back into the body and
+    re-wrapped — the fold is idempotent modulo re-wrapping to the current width.
     """
     indent = " " * (level + 1)
     lines = block.split("\n")
@@ -600,11 +672,11 @@ def _compact_inline_updates(block: str, level: int) -> str:
                 break
             parts.append(nxt)
             j += 1
-        body = flatten_prose("\n".join(parts))
-        line = f"{indent}*Update {m.group('ts').strip()}:*"
-        if body:
-            line += f" {body}"
-        out.append(line)
+        ts = m.group("ts").strip()
+        wrapped = _wrap_prose("\n".join(parts), indent, prefix=f"*Update {ts}:* ")
+        if not wrapped:
+            wrapped = [f"{indent}*Update {ts}:*"]
+        out.extend(wrapped)
         # Preserve one blank separator before whatever follows, matching render_activity_delta.
         if j < len(lines) and lines[j].strip():
             out.append("")
@@ -720,9 +792,9 @@ def render_activity_delta(
     (2) advancing its :LAST_SEEN: to the notification's updated_at, (3) back-filling an
     empty :NOTES: line if the carried block predates it (never touches a note the user
     already typed), and (4) rewriting the heading's priority tag to this run's bucket. Then
-    appends the new-activity prose inline under the item heading as an
-    ``*Update <timestamp>:*`` line (mirroring ``*Latest activity:*``) — NOT a child heading,
-    so it stays part of the parent item rather than splitting off its own org section.
+    appends the new-activity prose inline under the item heading as a soft-wrapped
+    ``*Update <timestamp>:*`` entry — NOT a child heading, so it stays part of the parent item
+    rather than splitting off its own org section.
 
     (4) matters because the caller sorts this block by the *freshly computed* bucket. Leaving the
     old tag in place made the heading disagree with the item's own position in the list, so
@@ -731,20 +803,19 @@ def render_activity_delta(
     """
     releveled = _relevel_block(prev_block.rstrip("\n"), target_top_level=level)
     # Heal any stale ``*** Update`` heading a pre-fix run left in the carried block, so the
-    # item carries only inline update lines before we append the newest one, then fold any
-    # multi-line update an older run wrote back onto one line (see _compact_inline_updates).
+    # item carries only inline update lines before we append the newest one, then re-fold any
+    # multi-line update an older run wrote to the wrapped form (see _compact_inline_updates).
     healed = _compact_inline_updates(_normalize_stale_update_headings(releveled, level), level)
     bumped = _ensure_notes_line(_bump_last_seen(healed, str(item.get("updated_at") or "")))
     bumped = _set_priority_tag(bumped, str(item.get("bucket", "low")))
     indent = " " * (level + 1)
-    # flatten_prose is load-bearing, not cosmetic: a column-0 ``*`` line here would be parsed as
-    # an Org heading next run and truncate everything below it (see flatten_prose).
-    out = [
-        bumped.rstrip("\n"),
-        "",
-        f"{indent}*Update {timestamp}:* {flatten_prose(delta.delta)}",
-        "",
-    ]
+    # _wrap_prose runs flatten_prose first: a column-0 ``*`` line here would otherwise be parsed
+    # as an Org heading next run and truncate everything below it (see flatten_prose). The label
+    # wraps together with the prose, and continuation lines carry the item indent.
+    update = _wrap_prose(delta.delta, indent, prefix=f"*Update {timestamp}:* ")
+    if not update:
+        update = [f"{indent}*Update {timestamp}:*"]
+    out = [bumped.rstrip("\n"), "", *update, ""]
     return "\n".join(out)
 
 
@@ -952,7 +1023,6 @@ def run_pipeline(user_request: str = "", *, base_url: str | None = None) -> RunS
     with start_session(backend, MODEL_ID, **backend_kwargs) as m_render:
         for item in full_items:
             enriched = item.get("enriched", {})
-            comment = item.get("latest_comment") or {}
             # Surface review + merge-queue status to the model alongside the raw
             # PR fields so the summary can mention "approved by X" / "in merge queue".
             details = {
@@ -968,36 +1038,45 @@ def run_pipeline(user_request: str = "", *, base_url: str | None = None) -> RunS
             description = strip_pr_template(enriched.get("body"))
             details.pop("body", None)
             render_thunk = m_render.instruct(
-                "Summarise this GitHub {{ subject_type }} for a triage inbox.\n"
+                "Summarise this GitHub {{ subject_type }} for a triage inbox. Produce TWO "
+                "separate summaries: one of the item's body (what it is about) and one of "
+                "the conversation on it (what people have been saying).\n"
                 "Title: {{ title }}\n"
                 "Repository: {{ repo }}\n"
                 "Description (template scaffolding already removed): {{ description }}\n"
                 "Subject details (JSON): {{ details }}\n"
-                "Latest comment (JSON, empty when none was fetched): {{ comment }}\n\n"
-                "Write a substantive 3-5 sentence summary that gives the reader enough "
-                "context to decide what to do without clicking through: what the "
-                "issue/PR is about, its current state, and any open questions or "
-                "blockers. Base it on the Description when one is given (ignore any "
-                "leftover checklist or boilerplate), and use concrete details from the "
-                "subject and latest comment (reviewers, labels, milestone, CI/merge "
-                "state) rather than restating the title. For PRs, note approval status "
-                "(who has approved, from review_summary.approved_by) and whether it is "
-                "in the merge queue or has auto-merge enabled (merge_queue_status) when "
-                "relevant. Then write a one-line latest-activity note (who did what, "
-                "with a short quoted excerpt if it clarifies the ask) — but if the "
-                "latest comment above is empty, return an empty string for it rather "
-                "than guessing or saying that nothing has happened.\n\n"
-                "Address the reader directly as 'you'; never refer to them in the third "
-                "person as 'the user'. Output plain prose only — this text goes into an "
-                "Org-mode document, so do not use markdown bold/italics, bullet lists, "
-                "or numbered lists anywhere.",
+                "Comment thread (JSON, oldest first, empty when none was fetched): "
+                "{{ comments }}\n"
+                "Reviews (JSON, oldest first, empty when none was fetched): {{ reviews }}\n\n"
+                "For body_summary: write a thorough summary of what this issue/PR is ABOUT, "
+                "based on the Description and subject details — the problem or proposal, the "
+                "approach, its current state, and any stated open questions or blockers — so "
+                "the reader has enough context to act without clicking through. Base it on "
+                "the Description when one is given (ignore any leftover checklist or "
+                "boilerplate) and use concrete subject details (labels, milestone, CI/merge "
+                "state) rather than restating the title. For PRs, note approval status (who "
+                "has approved, from review_summary.approved_by) and whether it is in the "
+                "merge queue or has auto-merge enabled (merge_queue_status) when relevant. Do "
+                "NOT recap the comment thread here.\n"
+                "For conversation_summary: summarise the discussion across the comment thread "
+                "and reviews above — the key points people raised, decisions or "
+                "disagreements, review outcomes (who approved / requested changes / "
+                "commented), open questions, blockers, and any agreed next steps. Name the "
+                "people involved and quote a short excerpt only when it clarifies the ask. If "
+                "the comment thread and reviews are both empty, return an empty string for it "
+                "rather than guessing or saying that nothing has happened.\n\n"
+                "Both summaries may be as long as the material warrants. Address the reader "
+                "directly as 'you'; never refer to them in the third person as 'the user'. "
+                "Output plain prose only — this text goes into an Org-mode document, so do "
+                "not use markdown bold/italics, bullet lists, or numbered lists anywhere.",
                 user_variables={
                     "subject_type": str(item.get("subject_type", "")),
                     "title": str(item.get("title", "")),
                     "repo": str(item.get("repo_full_name", "")),
                     "description": description,
                     "details": str(details),
-                    "comment": str(comment),
+                    "comments": str(item.get("all_comments") or []),
+                    "reviews": str(item.get("all_reviews") or []),
                 },
                 model_options={
                     ModelOption.SYSTEM_PROMPT: PREFIX_TEXT,
@@ -1005,15 +1084,14 @@ def run_pipeline(user_request: str = "", *, base_url: str | None = None) -> RunS
                 },
                 format=ItemRender,
             )
-            # On a parse failure fall back to the title as the summary and NO activity line —
-            # the old fallback put the raw updated_at timestamp in the prose slot, which read as
-            # an activity description but carried no information. render_item_subtree omits the
-            # line entirely when it's empty.
+            # On a parse failure fall back to the title as the body summary and NO conversation
+            # summary — render_item_subtree omits the conversation block entirely when empty, so
+            # an unparseable render degrades to a bare titled item rather than invented prose.
             render = _safe_parse_with_fallback(
                 render_thunk,
                 ItemRender,
-                summary=str(item.get("title", "")),
-                latest_activity="",
+                body_summary=str(item.get("title", "")),
+                conversation_summary="",
             )
             url = item.get("html_url", "")
             rendered[url] = (item, render)

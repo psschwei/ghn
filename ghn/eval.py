@@ -98,9 +98,10 @@ class _FakeSession:
     """Context-manager stand-in for a ``start_session`` handle.
 
     ``instruct`` dispatches on the requested ``format`` and returns canned JSON: an
-    ``ItemRender`` for full items, an ``ActivityDelta`` for delta items. Prose is keyed by the
-    item ``title`` threaded through ``user_variables`` so a fixture can feed markdown /
-    column-0 leaks to a specific item and lock the sanitised golden.
+    ``ItemRender`` (body_summary + conversation_summary) for full items, an ``ActivityDelta``
+    for delta items. Prose is keyed by the item ``title`` threaded through ``user_variables``
+    so a fixture can feed markdown / column-0 leaks to a specific item and lock the sanitised
+    golden.
     """
 
     def __init__(self, prose_by_title: dict[str, dict[str, str]], delta_by_title: dict[str, str]) -> None:
@@ -119,9 +120,11 @@ class _FakeSession:
             delta = self._delta.get(title, f"New activity on {title}.")
             return _FakeThunk(ActivityDelta(delta=delta).model_dump_json())
         canned = self._prose.get(title, {})
-        summary = canned.get("summary", f"Automated summary for {title}.")
-        latest = canned.get("latest_activity", "")
-        return _FakeThunk(ItemRender(summary=summary, latest_activity=latest).model_dump_json())
+        body = canned.get("body_summary", f"Automated summary for {title}.")
+        conversation = canned.get("conversation_summary", "")
+        return _FakeThunk(
+            ItemRender(body_summary=body, conversation_summary=conversation).model_dump_json()
+        )
 
 
 # --- fake tools ---------------------------------------------------------------
@@ -179,8 +182,8 @@ def _build_fake_tools(scenario: dict[str, Any]) -> tuple[SimpleNamespace, set[st
             subject_url, {}
         ).get("others" if exclude else "own", "none"),
         fetch_latest_comment=lambda url, host: dict(comment_by_curl.get(url, {})),
-        fetch_new_comments=lambda subject_url, host, *, since: list(newc_by_url.get(subject_url, [])),
-        fetch_new_reviews=lambda subject_url, host, *, since: list(newr_by_url.get(subject_url, [])),
+        fetch_new_comments=lambda subject_url, host, *, since=None: list(newc_by_url.get(subject_url, [])),
+        fetch_new_reviews=lambda subject_url, host, *, since=None: list(newr_by_url.get(subject_url, [])),
         mark_thread_done=lambda thread_id, host: done_ids.add(thread_id),
     )
     return fake, done_ids

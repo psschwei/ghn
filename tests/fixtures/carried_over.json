@@ -35,8 +35,8 @@
         "created_at": "2026-07-30T08:45:00Z"
       },
       "prose": {
-        "summary": "You have been assigned to roll back a cache TTL change that is causing cache stampedes in production. It is labelled incident and sre-oncall is asking for an immediate rollback.",
-        "latest_activity": "sre-oncall asked whether you can roll this back now, citing stampedes."
+        "body_summary": "You have been assigned to roll back a cache TTL change that is causing cache stampedes in production. It is labelled incident and sre-oncall is asking for an immediate rollback.",
+        "conversation_summary": "sre-oncall asked whether you can roll this back now, citing stampedes."
       }
     }
   ]

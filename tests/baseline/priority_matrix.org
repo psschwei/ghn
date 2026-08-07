@@ -18,11 +18,13 @@
   | Labels    | backend |
   | Milestone | v2 |
 
-  You have been assigned to add a retry budget to the scheduler, which currently drops jobs under load. It is open against the v2 milestone with a backend label. prodlead is asking whether you can land it before the v2 cut.
+  You have been assigned to add a retry budget to the scheduler, which currently drops jobs under
+  load. It is open against the v2 milestone with a backend label. prodlead is asking whether you can
+  land it before the v2 cut.
 
   *Why you're seeing this:* Assigned to you
 
-  *Latest activity:* prodlead asked whether you can take this before the v2 cut.
+  *Conversation:* prodlead asked whether you can take this before the v2 cut.
 
 * acme/widgets: Add structured logging to the ingest worker :high:
   :PROPERTIES:
@@ -45,7 +47,9 @@
   | Labels      | observability |
   | Milestone   | — |
 
-  This PR adds structured JSON logging to the ingest worker and is open with a clean mergeable state. You are a requested reviewer and have not yet reviewed it. There is one comment and no reviews so far.
+  This PR adds structured JSON logging to the ingest worker and is open with a clean mergeable
+  state. You are a requested reviewer and have not yet reviewed it. There is one comment and no
+  reviews so far.
 
   *Why you're seeing this:* Review requested
 
@@ -70,11 +74,14 @@
   | Labels      | design |
   | Milestone   | — |
 
-  This is a draft PR exploring a pluggable storage backend interface, not yet ready to merge. contributor-b has @-mentioned you with a design question about whether the interface must cover streaming writes. It carries a design label and has some review comments already.
+  This is a draft PR exploring a pluggable storage backend interface, not yet ready to merge.
+  contributor-b has @-mentioned you with a design question about whether the interface must cover
+  streaming writes. It carries a design label and has some review comments already.
 
   *Why you're seeing this:* You were mentioned
 
-  *Latest activity:* contributor-b asked whether the interface needs to cover streaming writes or if batch is enough for now.
+  *Conversation:* contributor-b asked whether the interface needs to cover streaming writes or if
+  batch is enough for now.
 
 * acme/widgets: Fix off-by-one in pagination cursor :low:
   :PROPERTIES:
@@ -97,7 +104,8 @@
   | Labels      | bug |
   | Milestone   | v2 |
 
-  Your PR fixing an off-by-one in the pagination cursor has been merged into the v2 milestone. It was approved by senior-eng. No further action is needed.
+  Your PR fixing an off-by-one in the pagination cursor has been merged into the v2 milestone. It
+  was approved by senior-eng. No further action is needed.
 
   *Why you're seeing this:* Activity on your PR/issue
 
@@ -122,6 +130,7 @@
   | Labels      | dependencies |
   | Milestone   | — |
 
-  A Dependabot PR bumping actions/checkout from v4 to v5, with auto-merge armed by octmaintainer. It is routine repo activity you are subscribed to and needs no action from you.
+  A Dependabot PR bumping actions/checkout from v4 to v5, with auto-merge armed by octmaintainer. It
+  is routine repo activity you are subscribed to and needs no action from you.
 
   *Why you're seeing this:* Repo activity

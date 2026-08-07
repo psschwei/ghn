@@ -26,4 +26,5 @@
 
  *Why you're seeing this:* Activity on your PR/issue
 
-  *Update 2026-07-30 09:00:* reviewer-x requested changes, asking you to add a test for the burst case before the rate limiter can be approved.
+  *Update 2026-07-30 09:00:* reviewer-x requested changes, asking you to add a test for the burst
+  case before the rate limiter can be approved.
